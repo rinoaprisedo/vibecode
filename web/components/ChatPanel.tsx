@@ -53,8 +53,12 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
   const [store, setStore] = useState<Record<string, ChatState>>({});
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [chatId, setChatId] = useState("");
+  // Each chat tab keeps its own half-typed message, so switching tabs never loses it.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const input = drafts[chatId] ?? "";
+  const setInputFor = (id: string, v: string) => setDrafts((d) => (d[id] === v ? d : { ...d, [id]: v }));
+  const setInput = (v: string) => setInputFor(chatId, v);
   const [ready, setReady] = useState(false);
-  const [input, setInput] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
   // grow with the text up to a cap (about 40% of the window, max 320px), then scroll
   useLayoutEffect(() => {
@@ -139,14 +143,14 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
   // ---- tabs ----
   const activate = (id: string) => {
     const t = tabsRef.current.find((x) => x.id === id);
-    setChatId(id); setInput("");
+    setChatId(id);
     if (t) { lastTab.current[t.project] = id; if (t.project !== projectRef.current) onFocusProject(t.project); }
   };
   const addTab = (id: string, project: string, state: ChatState) => {
     setStore((s) => ({ ...s, [id]: state }));
     setTabs((t) => (t.some((x) => x.id === id) ? t : [...t, { id, project }]));
     lastTab.current[project] = id;
-    setChatId(id); setInput("");
+    setChatId(id);
     if (project !== projectRef.current) onFocusProject(project);
   };
   const newTab = (project = projectRef.current) =>
@@ -174,6 +178,7 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
     setTabs(all.filter((t) => !ids.includes(t.id)));
     setStore((s) => { const n = { ...s }; ids.forEach((id) => delete n[id]); return n; });
     ids.forEach((id) => saved.current.delete(id));
+    setDrafts((d) => { const n = { ...d }; ids.forEach((id) => delete n[id]); return n; });
     if (!ids.includes(chatIdRef.current)) return;
     // The tab on screen went away: move to the nearest survivor (right first), or start a fresh tab.
     const idx = all.findIndex((t) => t.id === chatIdRef.current);
@@ -213,7 +218,7 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
     if (storeRef.current[chatIdRef.current]?.project === projectId) return;
     const last = lastTab.current[projectId];
     const open = tabsRef.current.find((t) => t.id === last) ?? tabsRef.current.find((t) => t.project === projectId);
-    if (open) { setChatId(open.id); setInput(""); return; }
+    if (open) { setChatId(open.id); return; }
     api<{ id: string }[]>("/api/chats", { project: projectId }).then((list) => {
       if (projectRef.current !== projectId) return;
       return list[0] ? openChat(list[0].id, projectId) : newTab(projectId);
@@ -341,7 +346,7 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
     const text = input.trim();
     if (!text && !pending.length) return;
     const id = chatId, files = pending, wasBusy = busy;
-    setInput(""); setAttached((a) => ({ ...a, [id]: [] }));
+    setInputFor(id, ""); setAttached((a) => ({ ...a, [id]: [] }));
     let ids: string[] = [];
     if (!wasBusy) patch(id, (c) => ({ ...c, busy: true, project: cur.project ?? projectId, account: accountId }));
     try { ids = await Promise.all(files.map((f) => uploadImage(f.blob))); }
