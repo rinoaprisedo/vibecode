@@ -46,23 +46,26 @@ function Section({ title, files, staged, selected, onSelect, onToggle, onToggleA
 export function GitPanel({ project, projectName, version, onOpen }: { project: string; projectName: string; version: number; onOpen: (p: string) => void }) {
   const call = <T = any,>(path: string, opts: { method?: string; body?: unknown } = {}) => api<T>(path, { ...opts, project });
   const [status, setStatus] = useState<Status | null>(null);
-  const [error, setError] = useState("");
+  const [notRepo, setNotRepo] = useState(false);
   const [diff, setDiff] = useState("");
   const [sel, setSel] = useState("");
   const [msg, setMsg] = useState("");
   const [pushing, setPushing] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
 
+  // Only "this folder isn't a repo" replaces the panel; any other git error is a message on top of the last good state.
   const refresh = () =>
-    call<Status>("/api/git/status").then((s) => { setStatus(s); setError(""); }).catch((e) => setError(e.message));
+    call<Status>("/api/git/status")
+      .then((s) => { setStatus(s); setNotRepo(false); })
+      .catch((e) => { if (/not a git repository/i.test(e.message)) setNotRepo(true); else setNote({ ok: false, text: e.message }); });
   useEffect(() => { refresh(); }, [version]);
 
-  const run = (fn: () => Promise<unknown>) => fn().then(refresh).catch((e) => setError(e.message));
+  const run = (fn: () => Promise<unknown>) => fn().then(refresh).catch((e) => { setNote({ ok: false, text: e.message }); refresh(); });
 
-  if (error) return (
+  if (notRepo) return (
     <div className="git">
-      <div className="err">{error}</div>
-      <button onClick={() => run(() => call("/api/git/init", { body: {} }))}>git init</button>
+      <div className="empty-hint">This folder isn't a git repository yet.</div>
+      <div style={{ textAlign: "center" }}><button className="primary" onClick={() => run(() => call("/api/git/init", { body: {} }))}>git init</button></div>
     </div>
   );
 
@@ -90,8 +93,11 @@ export function GitPanel({ project, projectName, version, onOpen }: { project: s
       .catch((e) => setNote({ ok: false, text: e.message }))
       .finally(() => { setPushing(false); refresh(); });
   };
+  // Stages every change (new files included) and commits them in one go.
   const commit = () =>
-    run(async () => { await call("/api/git/commit", { body: { message: msg } }); setMsg(""); setDiff(""); setSel(""); });
+    run(async () => { await call("/api/git/commit", { body: { message: msg } }); setMsg(""); setDiff(""); setSel(""); setNote({ ok: true, text: "Committed" }); });
+  const locked = !!note && !note.ok && /index\.lock|another git process/i.test(note.text);
+  const unlock = () => call("/api/git/unlock", { body: {} }).then(() => { setNote(null); refresh(); }).catch((e) => setNote({ ok: false, text: e.message }));
 
   return (
     <div className="git">
@@ -104,12 +110,17 @@ export function GitPanel({ project, projectName, version, onOpen }: { project: s
           <Icon name="upload" size={13} /> {pushing ? "Pushing…" : upstream ? `Push${ahead ? ` ${ahead}` : ""}` : "Publish"}
         </button>
       </div>
-      {note && <div className={note.ok ? "g-note ok" : "g-note err"} onClick={() => setNote(null)}>{note.text}</div>}
+      {note && (
+        <div className={note.ok ? "g-note ok" : "g-note err"} onClick={() => setNote(null)}>
+          {locked ? "Git is busy (index.lock exists). If nothing is running, the lock is stale." : note.text}
+          {locked && <button className="g-unlock" onClick={(e) => { e.stopPropagation(); unlock(); }}>Remove stale lock & retry</button>}
+        </div>
+      )}
       <div className="g-commit">
         <textarea rows={2} placeholder="Commit message" value={msg} onChange={(e) => setMsg(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && msg && stagedFiles.length) commit(); }} />
-        <button className="primary" disabled={!msg || !stagedFiles.length} onClick={commit}>
-          Commit{stagedFiles.length ? ` (${stagedFiles.length})` : ""}
+          onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && msg && files.length) commit(); }} />
+        <button className="primary" disabled={!msg || !files.length} onClick={commit} title="Stages all changes, then commits">
+          Commit all{files.length ? ` (${files.length})` : ""}
         </button>
       </div>
       <Section title="Staged Changes" files={stagedFiles} staged selected={sel}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, connect, imageUrl, uploadImage } from "../lib/api";
 import { isImage, MAX_ATTACHMENTS, toAttachment, type Attachment } from "../lib/images";
 import { LoginFlow } from "./LoginFlow";
@@ -69,6 +69,8 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
   const [defaultAccount, setDefaultAccount] = useState(() => { try { return localStorage.getItem("vibecode.account") ?? "default"; } catch { return "default"; } });
   const conn = useRef<ReturnType<typeof connect> | undefined>(undefined);
   const end = useRef<HTMLDivElement>(null);
+  const msgsRef = useRef<HTMLDivElement>(null);
+  const stick = useRef(true); // true while the view is pinned to the newest message
   const storeRef = useRef(store); storeRef.current = store;
   const tabsRef = useRef(tabs); tabsRef.current = tabs;
   const projectRef = useRef(projectId); projectRef.current = projectId;
@@ -83,6 +85,8 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
   soundRef.current = sound;
   const cur = store[chatId] ?? EMPTY;
   const { items, busy } = cur;
+  const lastUser = items.reduce((n, it, i) => (it.kind === "user" ? i : n), -1); // the newest prompt stays pinned at the top
+  const pendingPerms = items.filter((i): i is Extract<Item, { kind: "permission" }> => i.kind === "permission" && !i.answered);
   // The account this session runs with (falls back to the default if it was removed).
   const accountId = accounts.some((a) => a.id === (cur.account ?? defaultAccount)) ? (cur.account ?? defaultAccount) : accounts[0]?.id ?? "default";
   const account = accounts.find((a) => a.id === accountId);
@@ -217,7 +221,18 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
     return () => { conn.current?.close(); };
   }, []);
 
-  useEffect(() => { end.current?.scrollIntoView(); }, [items, busy, chatId]);
+  // Keep the newest message (and the loading animation) in view, unless the user scrolled up to read.
+  const toBottom = () => { const el = msgsRef.current; if (el) el.scrollTop = el.scrollHeight; };
+  useEffect(() => { stick.current = true; requestAnimationFrame(toBottom); }, [chatId]);
+  useEffect(() => { if (stick.current) requestAnimationFrame(toBottom); }, [items, busy, pendingPerms.length]);
+  // The viewport also shrinks when the approval dock or a thumbnail row appears: stay pinned through that too.
+  useEffect(() => {
+    const el = msgsRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => { if (stick.current) toBottom(); });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [chatId, projects.length, accountId]);
 
   // A closed folder takes its tabs (and running sessions) with it.
   useEffect(() => {
@@ -268,6 +283,7 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
   const send = async () => {
     const text = input.trim();
     if ((!text && !pending.length) || busy) return;
+    stick.current = true;
     const id = chatId, project = cur.project ?? projectId, files = pending;
     patch(id, (c) => ({ ...c, busy: true, project, account: accountId }));
     setInput(""); setAttached((a) => ({ ...a, [id]: [] }));
@@ -295,7 +311,6 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
     if (c.items.some((i) => i.kind === "permission" && !i.answered)) status[id] = "waiting";
     else if (c.busy) status[id] = "busy";
   }
-  const pendingPerms = items.filter((i): i is Extract<Item, { kind: "permission" }> => i.kind === "permission" && !i.answered);
   const nameOf = (id?: string) => projects.find((p) => p.id === id)?.name ?? "";
 
   // This session's account isn't signed in: sign it in here, or pick another account.
@@ -338,14 +353,14 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
         <div className="login-wrap"><div className="empty-hint">Add a folder in the explorer to start chatting with Claude about it.</div></div>
       ) : needsLogin ? (
         <div className="login-wrap">
-          <LoginFlow account={accountId} onDone={refreshAccounts} />
+          <LoginFlow account={accountId} onDone={refreshAccounts} onChanged={refreshAccounts} />
           <div className="login-alt">
             <span className="muted">Signing in as</span>
             <AccountMenu accounts={accounts} value={accountId} onChange={pickAccount} onManage={openSettings} />
           </div>
         </div>
       ) : (<>
-      <div className="messages">
+      <div className="messages" ref={msgsRef} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60; }}>
         {items.map((it, i) => {
           if (it.kind === "tool") {
             const t = toolView(it.name, it.input);
@@ -353,15 +368,10 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
           }
           if (it.kind === "permission") return null; // pending ones sit in the dock above the usage bar
           if (it.kind === "text") return <div key={i} className="msg text"><Markdown text={it.text} /></div>;
-          if (it.kind === "user") return (
-            <div key={i} className="msg user">
-              {it.images && <div className="msg-imgs">{it.images.map((id) => <a key={id} href={imageUrl(id)} target="_blank" rel="noreferrer"><img src={imageUrl(id)} alt="attachment" /></a>)}</div>}
-              {it.text}
-            </div>
-          );
+          if (it.kind === "user") return <UserMessage key={i} text={it.text} images={it.images} pinned={i === lastUser} />;
           return <div key={i} className={`msg ${it.kind}`}>{it.text}</div>;
         })}
-        {busy && <img className="loading" src="/loading.gif?v=2" alt="Claude is working…" />}
+        {busy && <img className="loading" src="/loading.gif?v=4" width={110} height={26} alt="Claude is working…" onLoad={() => stick.current && toBottom()} />}
         <div ref={end} />
       </div>
       {pendingPerms.length > 0 && (
@@ -418,6 +428,25 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
         </div>
       </div>
       </>)}
+    </div>
+  );
+}
+
+// A submitted prompt. Long ones are clamped (click to expand). The newest one is pinned to the top of the chat,
+// so after a long reply you can still see what you asked.
+function UserMessage({ text, images, pinned }: { text: string; images?: string[]; pinned: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [clamped, setClamped] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (el && !open) setClamped(el.scrollHeight > el.clientHeight + 1);
+  }, [text, open, pinned]);
+  return (
+    <div className={"msg user" + (pinned ? " pin" : "") + (open ? " open" : "")}>
+      {images && <div className="msg-imgs">{images.map((id) => <a key={id} href={imageUrl(id)} target="_blank" rel="noreferrer"><img src={imageUrl(id)} alt="attachment" /></a>)}</div>}
+      <div className="u-text" ref={box}>{text}</div>
+      {(clamped || open) && <button className="u-more" onClick={() => setOpen(!open)}>{open ? "Show less" : "Show more"}</button>}
     </div>
   );
 }

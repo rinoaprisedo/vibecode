@@ -3,12 +3,14 @@ import { api } from "../lib/api";
 import { Icon } from "./Icon";
 import { LoginFlow } from "./LoginFlow";
 import type { Account } from "./AccountMenu";
+import { applyTheme, useTheme } from "../lib/theme";
 
 // Settings → Accounts: add several Claude subscriptions and sign each in or out.
 export function SettingsModal({ accounts, refresh, onClose }: { accounts: Account[]; refresh: () => void; onClose: () => void }) {
   const [signingIn, setSigningIn] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [error, setError] = useState("");
+  const theme = useTheme();
 
   const run = (fn: () => Promise<unknown>) => fn().then(refresh).catch((e) => setError(e.message));
   const add = () => run(async () => { const a = await api<Account>("/api/accounts", { body: {} }); setSigningIn(a.id); });
@@ -25,7 +27,13 @@ export function SettingsModal({ accounts, refresh, onClose }: { accounts: Accoun
           <button className="g-icon" style={{ visibility: "visible" }} onClick={onClose}><Icon name="x" size={16} /></button>
         </div>
         <div className="modal-body">
-          <div className="sec-title">Claude accounts</div>
+          <div className="sec-title">Appearance</div>
+          <div className="theme-switch" role="group" aria-label="Theme">
+            <button className={theme === "dark" ? "on" : ""} onClick={() => applyTheme("dark")}><Icon name="moon" size={14} /> Dark</button>
+            <button className={theme === "light" ? "on" : ""} onClick={() => applyTheme("light")}><Icon name="sun" size={14} /> Light</button>
+          </div>
+
+          <div className="sec-title" style={{ marginTop: 8 }}>Claude accounts</div>
           <p className="muted sec-note">Each account keeps its own sign-in. Pick which one a chat session uses from the account button above the message box, so two sessions can run on two different subscriptions.</p>
           {error && <div className="err">{error}</div>}
           {accounts.map((a) => (
@@ -41,13 +49,13 @@ export function SettingsModal({ accounts, refresh, onClose }: { accounts: Accoun
                 </div>
                 <div className="acc-actions">
                   <button onClick={() => setSigningIn(signingIn === a.id ? null : a.id)}>{a.loggedIn ? "Switch login" : "Sign in"}</button>
-                  {a.loggedIn && a.id !== "default" && <button onClick={() => run(() => api(`/api/accounts/${a.id}/logout`, { body: {} }))}>Sign out</button>}
+                  {a.loggedIn && <button onClick={() => run(() => api(`/api/accounts/${a.id}/logout`, { body: {} }))}>Sign out</button>}
                   {a.id !== "default" && <button className="danger" title="Remove account" onClick={() => run(() => api(`/api/accounts/${a.id}`, { method: "DELETE" }))}><Icon name="x" size={13} /></button>}
                 </div>
               </div>
               {signingIn === a.id && (
                 <div className="acc-login">
-                  <LoginFlow account={a.id} onDone={() => { setSigningIn(null); refresh(); }} />
+                  <LoginFlow account={a.id} onDone={() => { setSigningIn(null); refresh(); }} onChanged={refresh} />
                 </div>
               )}
             </div>

@@ -4,13 +4,16 @@ import { api } from "../lib/api";
 type Win = { utilization: number | null; resets_at: string | null } | null | undefined;
 type Usage = { available: boolean; five_hour?: Win; seven_day?: Win };
 
+// "3 jam 20 mnt lagi" / "3 hari lagi": time left until the limit window resets.
 const resetsIn = (iso: string | null) => {
   if (!iso) return "";
-  const s = (Date.parse(iso) - Date.now()) / 1000;
-  if (s <= 0) return "Resets now";
-  if (s < 3600) return `Resets in ${Math.max(1, Math.round(s / 60))}m`;
-  if (s < 86400) return `Resets in ${Math.round(s / 3600)}h`;
-  return `Resets in ${Math.round(s / 86400)}d`;
+  const mins = Math.round((Date.parse(iso) - Date.now()) / 60000);
+  if (mins <= 0) return "sebentar lagi";
+  if (mins < 60) return `${mins} mnt lagi`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} jam${mins % 60 ? ` ${mins % 60} mnt` : ""} lagi`;
+  const days = Math.floor(hours / 24), rest = hours % 24;
+  return `${days} hari${days < 2 && rest ? ` ${rest} jam` : ""} lagi`;
 };
 
 const level = (pct: number) => (pct > 80 ? " hot" : pct >= 60 ? " warm" : " ok"); // <60 green, 60-80 yellow, >80 red
@@ -24,10 +27,12 @@ function ContextItem({ c }: { c: Context }) {
   const lv = level(pct);
   return (
     <div className="u-item u-ctx" title={`Context window: ${c.used.toLocaleString()} of ${c.max.toLocaleString()} tokens`}>
-      <span className="u-label">Ctx</span>
-      <div className="u-track"><div className={"u-fill" + lv} style={{ width: pct + "%" }} /></div>
-      <span className="u-tok">{fmt(c.used)}/{fmt(c.max)}</span>
-      <span className={"u-pct" + lv}>{pct}%</span>
+      <div className="u-top">
+        <span className="u-label">Ctx</span>
+        <div className="u-track"><div className={"u-fill" + lv} style={{ width: pct + "%" }} /></div>
+        <span className={"u-pct" + lv}>{pct}%</span>
+      </div>
+      <div className="u-sub">{fmt(c.used)} / {fmt(c.max)} token</div>
     </div>
   );
 }
@@ -38,9 +43,12 @@ function Item({ label, w }: { label: string; w: Win }) {
   const lv = level(pct);
   return (
     <div className="u-item" title={`${label} · ${resetsIn(w.resets_at)}`}>
-      <span className="u-label">{label}</span>
-      <div className="u-track"><div className={"u-fill" + lv} style={{ width: pct + "%" }} /></div>
-      <span className={"u-pct" + lv}>{pct}%</span>
+      <div className="u-top">
+        <span className="u-label">{label}</span>
+        <div className="u-track"><div className={"u-fill" + lv} style={{ width: pct + "%" }} /></div>
+        <span className={"u-pct" + lv}>{pct}%</span>
+      </div>
+      <div className="u-sub">{resetsIn(w.resets_at) || "\u00a0"}</div>
     </div>
   );
 }

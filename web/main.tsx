@@ -1,4 +1,14 @@
 import "./styles.css";
+import { applyTheme, getTheme } from "./lib/theme";
+applyTheme(getTheme());
+
+// No browser/WebKit right-click menu ("Reload", "Inspect Element"). Our own menus handle their areas; the native
+// one is kept only where it is useful: text fields and selected text (Cut / Copy / Paste).
+document.addEventListener("contextmenu", (e) => {
+  if (e.defaultPrevented) return;
+  const editable = (e.target as HTMLElement).closest?.("input, textarea, [contenteditable=true], .cm-content");
+  if (!editable && !window.getSelection()?.toString()) e.preventDefault();
+});
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { api, connect } from "./lib/api";
@@ -13,6 +23,7 @@ import { SettingsModal } from "./components/SettingsModal";
 import type { RemoteState } from "./components/RemotePanel";
 import { ContextMenu, tabMenu } from "./components/ContextMenu";
 import { Resizer } from "./components/Resizer";
+import { QuickOpen } from "./components/QuickOpen";
 import type { Account } from "./components/AccountMenu";
 
 type Tab = { key: string; project: string; path: string; content: string; dirty: boolean };
@@ -29,6 +40,7 @@ function App() {
   const [status, setStatus] = useState<Record<string, "busy" | "waiting">>({});
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
   const [ctx, setCtx] = useState<{ x: number; y: number; index: number } | null>(null);
   // Column widths (draggable); the file column takes whatever is left.
   const [w, setW] = useState<{ side: number; term: number; chat: number }>(() => {
@@ -46,11 +58,14 @@ function App() {
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
 
-  // Ctrl+` toggles the terminal, like VS Code.
+  // Keyboard shortcuts: Ctrl+` terminal, ⌘P / Ctrl+P quick open (captured so the browser never prints).
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.ctrlKey && e.key === "`") { e.preventDefault(); setTermOpen((o) => !o); } };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
+    const h = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === "`") { e.preventDefault(); setTermOpen((o) => !o); }
+      else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "p") { e.preventDefault(); e.stopPropagation(); setQuickOpen((o) => !o); }
+    };
+    window.addEventListener("keydown", h, true);
+    return () => window.removeEventListener("keydown", h, true);
   }, []);
 
   const loadProjects = useCallback(async () => {
@@ -103,6 +118,17 @@ function App() {
     if (keys.includes(active)) setActive(rest.at(-1)?.key ?? "");
   };
   const close = (key: string) => closeTabs([key]);
+  // Files moved or deleted from the explorer: keep editor tabs in step.
+  const under = (path: string, base: string) => path === base || path.startsWith(base + "/");
+  const renameTabs = (project: string, from: string, to: string) => {
+    setTabs((ts) => ts.map((t) => {
+      if (t.project !== project || !under(t.path, from)) return t;
+      const path = to + t.path.slice(from.length);
+      return { ...t, path, key: tabKey(project, path) };
+    }));
+    setActive((a) => (a.startsWith(project + ":") && under(a.slice(project.length + 1), from) ? tabKey(project, to + a.slice(project.length + 1 + from.length)) : a));
+  };
+  const deleteTabs = (project: string, path: string) => closeTabs(tabsRef.current.filter((t) => t.project === project && under(t.path, path)).map((t) => t.key));
   const nameOf = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p.name])), [projects]);
 
   // Default is two columns (explorer | chat); an open file and the terminal slot in between, left to right.
@@ -134,11 +160,15 @@ function App() {
         </div>
         <div className="folder">
           <span className="muted root">{side === "files" ? "Projects" : "Source control"}</span>
-          <AddFolderMenu onAdded={setActiveId} />
+          <span className="folder-actions">
+            <button className="g-icon" style={{ visibility: "visible" }} title="Search files (⌘P)" onClick={() => setQuickOpen(true)}><Icon name="search" size={15} /></button>
+            <AddFolderMenu onAdded={setActiveId} />
+          </span>
         </div>
         {side === "files"
           ? <FileTree projects={projects} activeId={activeId} versions={versions} status={status} remote={remote}
-              onActivate={setActiveId} onRemove={removeFolder} onOpen={open} />
+              onActivate={setActiveId} onRemove={removeFolder} onOpen={open}
+              onChanged={(id) => setVersions((v) => ({ ...v, [id]: (v[id] ?? 0) + 1 }))} onRenamed={renameTabs} onDeleted={deleteTabs} />
           : project && <GitPanel key={project.id} project={project.id} projectName={project.name} version={versions[project.id] ?? 0} onOpen={(p) => open(project.id, p)} />}
         <div className="statusbar">
           <button className={termOpen ? "on" : ""} onClick={() => setTermOpen((o) => !o)} title="Ctrl+`"><Icon name="terminal" size={14} /> Terminal</button>
@@ -172,6 +202,11 @@ function App() {
       <ChatPanel projects={projects} projectId={activeId} onFocusProject={setActiveId} onStatus={setStatus}
         accounts={accounts} refreshAccounts={refreshAccounts} openSettings={() => setSettingsOpen(true)}
         project={project} remote={project ? remote[project.id] : undefined} width={panes ? eff.chat : undefined} />
+      {quickOpen && project && (
+        <QuickOpen project={project}
+          recent={tabs.filter((t) => t.project === project.id).map((t) => t.path).reverse()}
+          onOpen={(path) => open(project.id, path)} onClose={() => setQuickOpen(false)} />
+      )}
       {ctx && <ContextMenu x={ctx.x} y={ctx.y} onClose={() => setCtx(null)} items={tabMenu(tabs.map((t) => t.key), ctx.index, closeTabs)} />}
       {settingsOpen && <SettingsModal accounts={accounts} refresh={refreshAccounts} onClose={() => setSettingsOpen(false)} />}
     </div>

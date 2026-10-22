@@ -1,2 +1,5 @@
 node_modules
 web/dist
+build
+.*.bun-build
+.DS_Store
