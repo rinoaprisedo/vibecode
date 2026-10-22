@@ -40,7 +40,7 @@ export function ModelMenu({ value, onChange, account }: { value: string; onChang
           ))}
         </div>
       )}
-      <button className="modebtn" onClick={() => setOpen(!open)} title="Model"><Icon name="sparkle" size={14} /> {label} <Icon name="chevronDown" size={12} /></button>
+      <button className="modebtn" onClick={() => setOpen(!open)} title="Model"><Icon name="sparkle" size={14} /><span className="lbl">{label}</span><Icon name="chevronDown" size={12} className="lbl" /></button>
     </div>
   );
 }

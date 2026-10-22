@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { api, connect, imageUrl, uploadImage } from "../lib/api";
 import { isImage, MAX_ATTACHMENTS, toAttachment, type Attachment } from "../lib/images";
 import { LoginFlow } from "./LoginFlow";
@@ -11,6 +11,7 @@ import { ContextMenu, tabMenu } from "./ContextMenu";
 import { ModelMenu } from "./ModelMenu";
 import { Icon, type IconName } from "./Icon";
 import { Markdown } from "./Markdown";
+import { projectTint } from "../lib/projectColor";
 
 const loadSettings = (): Settings => {
   try { return { mode: "manual", effort: "medium", ultracode: false, model: "", ...JSON.parse(localStorage.getItem("vibecode.settings") ?? "{}") }; }
@@ -54,6 +55,15 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
   const [chatId, setChatId] = useState("");
   const [ready, setReady] = useState(false);
   const [input, setInput] = useState("");
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  // grow with the text up to a cap (about 40% of the window, max 320px), then scroll
+  useLayoutEffect(() => {
+    const el = taRef.current; if (!el) return;
+    el.style.height = "auto";
+    const max = Math.min(320, Math.round(window.innerHeight * 0.4));
+    el.style.height = Math.min(Math.max(el.scrollHeight, 58), max) + "px";
+    el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
+  }, [input]);
   const [attached, setAttached] = useState<Record<string, Attachment[]>>({}); // pending images per chat tab
   const [dragging, setDragging] = useState(false);
   const [tabCtx, setTabCtx] = useState<{ x: number; y: number; index: number } | null>(null);
@@ -78,6 +88,22 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
   const accountsRef = useRef(accounts); accountsRef.current = accounts;
   const attachedRef = useRef(attached); attachedRef.current = attached;
   const soundRef = useRef(true);
+  const [zoom, setZoom] = useState<string | null>(null); // image shown full-size in a popup
+  useEffect(() => {
+    if (!zoom) return;
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape") setZoom(null); };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [zoom]);
+  const nameOfRef = useRef<(id?: string) => string>(() => "");
+  const openChatRef = useRef<(id: string, project?: string) => Promise<void>>(async () => {});
+  // Banner for the native Mac app (clicking it comes back through window.__vibecodeOpen).
+  const nativeBanner = (title: string, body: string, chatId: string, project: string) =>
+    (window as any).webkit?.messageHandlers?.notify?.postMessage({ title, body, subtitle: nameOfRef.current(project), chatId, project });
+  useEffect(() => {
+    (window as any).__vibecodeOpen = (chatId: string, project: string) => { openChatRef.current(chatId, project).catch(() => {}); };
+    return () => { delete (window as any).__vibecodeOpen; };
+  }, []);
   const saved = useRef(new Map<string, ChatState>());   // last persisted state per chat
   const lastTab = useRef<Record<string, string>>({});   // tab last viewed in each project
 
@@ -86,7 +112,18 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
   const cur = store[chatId] ?? EMPTY;
   const { items, busy } = cur;
   const lastUser = items.reduce((n, it, i) => (it.kind === "user" ? i : n), -1); // the newest prompt stays pinned at the top
-  const pendingPerms = items.filter((i): i is Extract<Item, { kind: "permission" }> => i.kind === "permission" && !i.answered);
+  const allPerms = items.filter((i): i is Extract<Item, { kind: "permission" }> => i.kind === "permission" && !i.answered);
+  const pendingPerms = allPerms.filter((i) => i.tool !== "AskUserQuestion" && i.tool !== "ExitPlanMode");
+  const plan = allPerms.find((i) => i.tool === "ExitPlanMode"); // plan approval docks like a question
+  const ask = allPerms.find((i) => i.tool === "AskUserQuestion"); // questions from Claude open as a popup
+  const [stopping, setStopping] = useState<Record<string, boolean>>({}); // Stop pressed, run not finished yet
+  // Messages sent while Claude is still working wait here and go out one by one when the run ends.
+  const [queue, setQueue] = useState<Record<string, { text: string; ids: string[] }[]>>({});
+  const queueRef = useRef(queue); queueRef.current = queue;
+  const dispatchRef = useRef<(id: string, text: string, ids: string[]) => void>(() => {});
+  // Interrupt the current run; the first queued message goes out as soon as it has ended.
+  const sendNow = () => { setStopping((x) => ({ ...x, [chatId]: true })); conn.current?.send({ type: "stop", chatId }); };
+  const stopChat = () => { setQueue((q) => ({ ...q, [chatId]: [] })); queueRef.current = { ...queueRef.current, [chatId]: [] }; setStopping((x) => ({ ...x, [chatId]: true })); conn.current?.send({ type: "stop", chatId }); };
   // The account this session runs with (falls back to the default if it was removed).
   const accountId = accounts.some((a) => a.id === (cur.account ?? defaultAccount)) ? (cur.account ?? defaultAccount) : accounts[0]?.id ?? "default";
   const account = accounts.find((a) => a.id === accountId);
@@ -129,6 +166,7 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
     if (tabsRef.current.some((t) => t.id === id)) return activate(id);
     addTab(id, project, await loadChat(id, project));
   };
+  openChatRef.current = openChat;
   const closeMany = (ids: string[]) => {
     if (!ids.length) return;
     ids.forEach((id) => conn.current?.send({ type: "stop", chatId: id }));
@@ -189,9 +227,10 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
         push(m.chatId, { kind: "permission", id: m.id, tool: m.tool, input: m.input });
         if (soundRef.current) {
           const tid = crypto.randomUUID();
-          const what = m.tool === "ExitPlanMode" ? "Plan ready for review" : String(m.input?.command ?? m.input?.file_path ?? m.tool);
+          const what = m.tool === "ExitPlanMode" ? "Plan ready for review" : m.tool === "AskUserQuestion" ? String(m.input?.questions?.[0]?.question ?? "Claude has a question") : String(m.input?.command ?? m.input?.file_path ?? m.tool);
           setToasts((t) => [...t.slice(-2), { id: tid, chatId: m.chatId, project: storeRef.current[m.chatId]?.project ?? "", title: "Needs your approval", body: `${m.tool}: ${what}`.slice(0, 140), warn: true }]);
           setTimeout(() => setToasts((t) => t.filter((x) => x.id !== tid)), 9000);
+          nativeBanner("Needs your approval", `${m.tool}: ${what}`.slice(0, 140), m.chatId, storeRef.current[m.chatId]?.project ?? "");
         }
       }
       else if (m.type === "error") {
@@ -200,11 +239,19 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
       }
       else if (m.type === "done") {
         patch(m.chatId, (c) => ({ ...c, busy: false }));
+        const next = queueRef.current[m.chatId]?.[0];
+        if (next) {
+          setQueue((q) => ({ ...q, [m.chatId]: (q[m.chatId] ?? []).slice(1) }));
+          queueRef.current = { ...queueRef.current, [m.chatId]: queueRef.current[m.chatId].slice(1) };
+          setTimeout(() => dispatchRef.current(m.chatId, next.text, next.ids), 0);
+        }
+        setStopping((x) => { if (!x[m.chatId]) return x; const n = { ...x }; delete n[m.chatId]; return n; });
         setTimeout(() => setUsageKey((k) => k + 1), 1500);
         if (m.notify) {
           const id = crypto.randomUUID();
           setToasts((t) => [...t.slice(-2), { id, chatId: m.chatId, project: storeRef.current[m.chatId]?.project ?? "", ...m.notify }]);
           setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 7000);
+          nativeBanner(m.notify.title, m.notify.body, m.chatId, storeRef.current[m.chatId]?.project ?? "");
         }
       }
       else if (m.type === "sdk") {
@@ -280,22 +327,35 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
     setAttached((a) => ({ ...a, [chatId]: (a[chatId] ?? []).filter((x) => { if (x.key === key) URL.revokeObjectURL(x.preview); return x.key !== key; }) }));
   };
 
+  // Start a run for this chat with an already-uploaded prompt.
+  const dispatch = (id: string, text: string, ids: string[]) => {
+    const c = storeRef.current[id];
+    const project = c?.project ?? projectId;
+    stick.current = true;
+    patch(id, (x) => ({ ...x, busy: true, project, account: x.account ?? accountId }));
+    push(id, { kind: "user", text, ...(ids.length ? { images: ids } : {}) });
+    conn.current?.send({ type: "prompt", chatId: id, project, text, images: ids, opts: { ...settings, resume: c?.claudeSession, sound, account: c?.account ?? accountId } });
+  };
+  dispatchRef.current = dispatch;
   const send = async () => {
     const text = input.trim();
-    if ((!text && !pending.length) || busy) return;
-    stick.current = true;
-    const id = chatId, project = cur.project ?? projectId, files = pending;
-    patch(id, (c) => ({ ...c, busy: true, project, account: accountId }));
+    if (!text && !pending.length) return;
+    const id = chatId, files = pending, wasBusy = busy;
     setInput(""); setAttached((a) => ({ ...a, [id]: [] }));
     let ids: string[] = [];
+    if (!wasBusy) patch(id, (c) => ({ ...c, busy: true, project: cur.project ?? projectId, account: accountId }));
     try { ids = await Promise.all(files.map((f) => uploadImage(f.blob))); }
-    catch (e) { push(id, { kind: "error", text: String(e instanceof Error ? e.message : e) }); patch(id, (c) => ({ ...c, busy: false })); return; }
+    catch (e) { push(id, { kind: "error", text: String(e instanceof Error ? e.message : e) }); if (!wasBusy) patch(id, (c) => ({ ...c, busy: false })); return; }
     finally { files.forEach((f) => URL.revokeObjectURL(f.preview)); }
-    push(id, { kind: "user", text, ...(ids.length ? { images: ids } : {}) });
-    conn.current?.send({ type: "prompt", chatId: id, project, text, images: ids, opts: { ...settings, resume: cur.claudeSession, sound, account: accountId } });
+    // Still working (or became busy while uploading): queue it, like VS Code does.
+    if (wasBusy) {
+      setQueue((q) => ({ ...q, [id]: [...(q[id] ?? []), { text, ids }] }));
+      return;
+    }
+    dispatch(id, text, ids);
   };
-  const answer = (id: string, allow: boolean) => {
-    conn.current?.send({ type: "permission", id, allow });
+  const answer = (id: string, allow: boolean, answers?: Record<string, string>, message?: string, mode?: string) => {
+    conn.current?.send({ type: "permission", id, allow, answers, message, mode });
     patch(chatId, (c) => ({ ...c, items: c.items.map((x) => (x.kind === "permission" && x.id === id ? { ...x, answered: true } : x)) }));
   };
   const pickAccount = (id: string) => {
@@ -311,13 +371,21 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
     if (c.items.some((i) => i.kind === "permission" && !i.answered)) status[id] = "waiting";
     else if (c.busy) status[id] = "busy";
   }
+  const projTint = (id: string) => projectTint(projects, id);
   const nameOf = (id?: string) => projects.find((p) => p.id === id)?.name ?? "";
+  nameOfRef.current = nameOf;
 
   // This session's account isn't signed in: sign it in here, or pick another account.
   const needsLogin = !!account && !account.loggedIn;
 
   return (
     <div className="chat" style={width ? { width, flex: "none" } : undefined}>
+      {zoom && (
+        <div className="lightbox" onClick={() => setZoom(null)}>
+          <img src={zoom} alt="" onClick={(e) => e.stopPropagation()} />
+          <button className="lb-x" title="Close (Esc)" onClick={() => setZoom(null)}><Icon name="x" size={18} /></button>
+        </div>
+      )}
       <div className="toasts">
         {toasts.map((t) => (
           <div key={t.id} className="toast" onClick={() => { setToasts((x) => x.filter((y) => y.id !== t.id)); if (t.project) openChat(t.chatId, t.project).catch(() => {}); }}>
@@ -336,7 +404,7 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
                 onContextMenu={(e) => { e.preventDefault(); setTabCtx({ x: e.clientX, y: e.clientY, index: tabs.findIndex((x) => x.id === t.id) }); }}>
                 {st && <span className={"h-dot " + st} />}
                 <span className="ct-title">{titleOf(c) || "New chat"}</span>
-                {projects.length > 1 && <span className="ct-proj">{nameOf(t.project)}</span>}
+                {projects.length > 1 && <span className="ct-proj" style={projTint(t.project)}>{nameOf(t.project)}</span>}
                 <span className="x" title="Close tab" onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}><Icon name="x" size={12} /></span>
               </div>
             );
@@ -360,11 +428,15 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
           </div>
         </div>
       ) : (<>
-      <div className="messages" ref={msgsRef} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60; }}>
+      <div className="messages" ref={msgsRef}
+        onClick={(e) => { // any picture inside the conversation (sent attachments, markdown images) opens in the popup
+          const img = (e.target as HTMLElement).closest?.("img.zoomable, .msg-imgs img, .md img") as HTMLImageElement | null;
+          if (img?.src && !img.classList.contains("loading")) { e.preventDefault(); setZoom(img.src); }
+        }}
+        onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60; }}>
         {items.map((it, i) => {
           if (it.kind === "tool") {
-            const t = toolView(it.name, it.input);
-            return <div key={i} className={"tool t-" + t.tone} title={brief(it.input)}><Icon name={t.icon} size={12} /><b>{it.name}</b><span>{t.detail}</span></div>;
+            return <ToolItem key={i} name={it.name} input={it.input} />;
           }
           if (it.kind === "permission") return null; // pending ones sit in the dock above the usage bar
           if (it.kind === "text") return <div key={i} className="msg text"><Markdown text={it.text} /></div>;
@@ -389,6 +461,8 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
           ))}
         </div>
       )}
+      {plan && <PlanDock key={plan.id} plan={String(plan.input?.plan ?? "")} onApprove={(autoEdit) => { if (autoEdit) update({ ...settings, mode: "edit" }); answer(plan.id, true, undefined, undefined, autoEdit ? "edit" : undefined); }} onRevise={(note) => answer(plan.id, false, undefined, "The user wants the plan revised. Do not implement yet; update the plan and present it again." + (note ? `\nUser notes: ${note}` : ""))} />}
+      {ask && <AskDock key={ask.id} input={ask.input} onSubmit={(answers) => answer(ask.id, true, answers)} onCancel={() => answer(ask.id, false)} />}
       <UsageBar refreshKey={usageKey} context={cur.context} account={accountId} />
       <div className={"composer" + (dragging ? " drag" : "")}
         onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDragging(true); } }}
@@ -398,13 +472,25 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
           <div className="attach-row">
             {pending.map((a) => (
               <div key={a.key} className="thumb" title={a.name}>
-                <img src={a.preview} alt={a.name} />
+                <img className="zoomable" src={a.preview} alt={a.name} onClick={() => setZoom(a.preview)} />
                 <button className="thumb-x" onClick={() => removeAttachment(a.key)} title="Remove"><Icon name="x" size={11} /></button>
               </div>
             ))}
           </div>
         )}
+        {(queue[chatId]?.length ?? 0) > 0 && (
+          <div className="queue">
+            {queue[chatId].map((q, i) => (
+              <div key={i} className="q-item" title={q.text}>
+                <span className="q-tag">Queued</span><span className="q-txt">{q.text || "(image)"}</span>
+                {i === 0 && busy && <button className="q-now" title="Send now (Enter): interrupts the current reply" onClick={sendNow}><Icon name="send" size={11} /></button>}
+                <button title="Remove" onClick={() => setQueue((x) => ({ ...x, [chatId]: x[chatId].filter((_, j) => j !== i) }))}><Icon name="x" size={11} /></button>
+              </div>
+            ))}
+          </div>
+        )}
         <textarea
+          ref={taRef} rows={1} spellCheck={false} autoCorrect="off" autoCapitalize="off" autoComplete="off"
           value={input} placeholder="Ask Claude…  (Enter to send, paste images)"
           onChange={(e) => setInput(e.target.value)}
           onPaste={(e) => {
@@ -413,7 +499,11 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
           }}
           onKeyDown={(e) => {
             if (e.key === "Tab" && e.shiftKey) { e.preventDefault(); update({ ...settings, mode: nextMode(settings.mode) }); return; }
-            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              // Enter on an empty box while messages are queued: stop waiting and send the next one now.
+              if (busy && !input.trim() && !pending.length && (queue[chatId]?.length ?? 0) > 0) sendNow(); else send();
+            } }}
         />
         <div className="composer-bar">
         <ModeMenu value={settings} onChange={update} />
@@ -423,11 +513,81 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
         <button className="modebtn soundbtn" title={sound ? "Sound & notification on" : "Sound & notification off"} onClick={toggleSound}><Icon name={sound ? "bell" : "bellOff"} size={15} /></button>
         <span className="spacer" />
         {busy
-          ? <button className="sendbtn stop" title="Stop" onClick={() => conn.current?.send({ type: "stop", chatId })}><Icon name="stop" size={14} /></button>
+          ? (input.trim() || pending.length) && !stopping[chatId]
+            ? <button className="sendbtn" title="Queue message (sent when Claude finishes)" onClick={send}><Icon name="send" size={16} /></button>
+            : stopping[chatId]
+              ? <button className="sendbtn stop stopping" title="Stopping…" disabled><span className="spin" /></button>
+              : <button className="sendbtn stop" title="Stop" onClick={stopChat}><Icon name="stop" size={14} /></button>
           : <button className="sendbtn" title="Send" disabled={!input.trim() && !pending.length} onClick={send}><Icon name="send" size={16} /></button>}
         </div>
       </div>
       </>)}
+    </div>
+  );
+}
+
+// Claude's AskUserQuestion, docked above the usage meters (the rest of the UI stays usable).
+// With several questions they appear one at a time; picking an option on a single-choice question moves on.
+function AskDock({ input, onSubmit, onCancel }: { input: any; onSubmit: (a: Record<string, string>) => void; onCancel: () => void }) {
+  const qs: { question: string; header?: string; multiSelect?: boolean; options: { label: string; description?: string }[] }[] = input?.questions ?? [];
+  const [step, setStep] = useState(0);
+  const [done, setDone] = useState<Record<string, string>>({});
+  const [multi, setMulti] = useState<string[]>([]);
+  const [other, setOther] = useState("");
+  const q = qs[step];
+  if (!q) return null;
+  const advance = (value: string) => {
+    const next = { ...done, [q.question]: value };
+    if (step + 1 >= qs.length) return onSubmit(next);
+    setDone(next); setStep(step + 1); setMulti([]); setOther("");
+  };
+  const custom = other.trim();
+  return (
+    <div className="ask-dock">
+      <div className="ask-head">
+        <span className="ask-title">{q.header ? <em>{q.header}</em> : null}{q.question}</span>
+        {qs.length > 1 && <span className="ask-step">{step + 1}/{qs.length}</span>}
+        <button className="ask-skip" title="Skip" onClick={onCancel}><Icon name="x" size={12} /></button>
+      </div>
+      <div className="ask-opts">
+        {q.options.map((o) => {
+          const on = multi.includes(o.label);
+          return (
+            <button key={o.label} className={"ask-opt" + (on ? " on" : "")} title={o.description}
+              onClick={() => q.multiSelect ? setMulti(on ? multi.filter((x) => x !== o.label) : [...multi, o.label]) : advance(o.label)}>
+              <b>{o.label}</b>{o.description && <small>{o.description}</small>}
+            </button>
+          );
+        })}
+      </div>
+      <div className="ask-foot">
+        <input placeholder="Other…" value={other} onChange={(e) => setOther(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && (custom || multi.length)) advance([...multi, ...(custom ? [custom] : [])].join(", ")); }} />
+        {(q.multiSelect || custom) && (
+          <button className="primary" disabled={!multi.length && !custom}
+            onClick={() => advance([...multi, ...(custom ? [custom] : [])].join(", "))}>{step + 1 >= qs.length ? "Send" : "Next"}</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Plan approval: read the plan, then start work, or keep planning with a note for Claude.
+function PlanDock({ plan, onApprove, onRevise }: { plan: string; onApprove: (autoEdit: boolean) => void; onRevise: (note: string) => void }) {
+  const [note, setNote] = useState("");
+  return (
+    <div className="ask-dock plan-dock">
+      <div className="ask-head"><span className="ask-title">Plan ready. Start working on it?</span></div>
+      <div className="plan-body"><Markdown text={plan} /></div>
+      <div className="ask-opts">
+        <button className="ask-opt" onClick={() => onApprove(true)}><b>Yes, and auto-edit</b><small>Start working; edit files without asking for the rest of the session</small></button>
+        <button className="ask-opt" onClick={() => onApprove(false)}><b>Yes, ask before each edit</b><small>Start working; keep approving every edit manually</small></button>
+      </div>
+      <div className="ask-foot">
+        <input placeholder="No, keep planning: tell Claude what to change…" value={note} onChange={(e) => setNote(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") onRevise(note.trim()); }} />
+        <button className="primary" onClick={() => onRevise(note.trim())}>{note.trim() ? "Revise" : "Keep planning"}</button>
+      </div>
     </div>
   );
 }
@@ -447,6 +607,30 @@ function UserMessage({ text, images, pinned }: { text: string; images?: string[]
       {images && <div className="msg-imgs">{images.map((id) => <a key={id} href={imageUrl(id)} target="_blank" rel="noreferrer"><img src={imageUrl(id)} alt="attachment" /></a>)}</div>}
       <div className="u-text" ref={box}>{text}</div>
       {(clamped || open) && <button className="u-more" onClick={() => setOpen(!open)}>{open ? "Show less" : "Show more"}</button>}
+    </div>
+  );
+}
+
+// A tool call: one-line chip (with Claude's own description of the step when it gave one); click to see everything.
+function ToolItem({ name, input }: { name: string; input: any }) {
+  const [open, setOpen] = useState(false);
+  const t = toolView(name, input);
+  const why: string = name === "Bash" || name === "Task" || name === "Agent" ? input?.description ?? "" : "";
+  const lines = (txt: string, cls: string) => String(txt ?? "").split("\n").map((l, i) => <div key={i} className={cls}>{(cls === "d-add" ? "+ " : cls === "d-del" ? "- " : "  ") + l}</div>);
+  const edits: { old_string?: string; new_string?: string }[] = name === "Edit" ? [input] : name === "MultiEdit" ? input?.edits ?? [] : [];
+  let body: ReactNode;
+  if (edits.length) body = <>{input?.file_path && <div className="tool-path">{input.file_path}</div>}{edits.map((e, i) => <div key={i} className="tool-diff">{lines(e.old_string ?? "", "d-del")}{lines(e.new_string ?? "", "d-add")}</div>)}</>;
+  else if (name === "Write") body = <>{<div className="tool-path">{input?.file_path}</div>}<div className="tool-diff">{lines(String(input?.content ?? "").slice(0, 4000), "d-add")}</div></>;
+  else if (name === "Bash") body = <>{why && <div className="tool-why">{why}</div>}<pre className="tool-pre">{input?.command}</pre></>;
+  else body = <pre className="tool-pre">{JSON.stringify(input, null, 2)}</pre>;
+  return (
+    <div className={"tool-wrap" + (open ? " open" : "")}>
+      <div className={"tool t-" + t.tone} onClick={() => setOpen(!open)} title={open ? "Hide details" : "Show details"}>
+        <Icon name={t.icon} size={12} /><b>{name}</b><span>{t.detail}</span>
+        {why && !open && <em className="tool-note">{why}</em>}
+        <Icon name={open ? "chevronDown" : "chevronRight"} size={11} />
+      </div>
+      {open && <div className="tool-body">{body}</div>}
     </div>
   );
 }

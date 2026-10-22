@@ -58,10 +58,10 @@ const start = (port: number) => Bun.serve<Data>({
     const url = new URL(req.url);
     const p = url.pathname;
 
-    if (p === "/") return new Response(Bun.file(join(webDir, "index.html")));
-    if (p === "/main.js") return new Response(Bun.file(join(webDir, "dist", "main.js")));
+    if (p === "/") return new Response(Bun.file(join(webDir, "index.html")), { headers: { "Cache-Control": "no-cache" } });
+    if (p === "/main.js") return new Response(Bun.file(join(webDir, "dist", "main.js")), { headers: { "Cache-Control": "no-cache" } });
     if (p === "/loading.gif") return new Response(Bun.file(join(webDir, "loading.gif")));
-    if (p === "/main.css") return new Response(Bun.file(join(webDir, "dist", "main.css")));
+    if (p === "/main.css") return new Response(Bun.file(join(webDir, "dist", "main.css")), { headers: { "Cache-Control": "no-cache" } });
 
     if (url.searchParams.get("token") !== token && req.headers.get("x-token") !== token)
       return json({ error: "unauthorized" }, 401);
@@ -113,7 +113,7 @@ const start = (port: number) => Bun.serve<Data>({
       }
       // Claude accounts: each is its own login; a chat picks one.
       if (p === "/api/accounts" && req.method === "GET") {
-        return json(await Promise.all((await accounts.list()).map(async (a) => ({ id: a.id, name: a.name, ...(await authStatus(a.dir)) }))));
+        return json(await Promise.all((await accounts.list()).map(async (a) => ({ id: a.id, name: a.name, color: a.color, ...(await authStatus(a.dir)) }))));
       }
       if (p === "/api/accounts" && req.method === "POST") {
         const { name } = await req.json().catch(() => ({}));
@@ -124,7 +124,7 @@ const start = (port: number) => Bun.serve<Data>({
         const [id, action] = p.slice("/api/accounts/".length).split("/");
         const a = await accounts.get(id);
         if (action === "logout" && req.method === "POST") { await makeLogin(() => {}).logout(a.dir); return json({ ok: true }); }
-        if (!action && req.method === "PATCH") { await accounts.rename(id, (await req.json()).name); return json({ ok: true }); }
+        if (!action && req.method === "PATCH") { const b = await req.json(); if (b.name) await accounts.rename(id, b.name); if (b.color) await accounts.setColor(id, b.color); return json({ ok: true }); }
         if (!action && req.method === "DELETE") { await makeLogin(() => {}).logout(a.dir); await accounts.remove(id); return json({ ok: true }); }
       }
       if (p === "/api/models") return json(await getModels(anyRoot(), (await accounts.get(q.get("account") ?? "")).dir));
@@ -161,6 +161,7 @@ const start = (port: number) => Bun.serve<Data>({
       if (p === "/api/git/unstage") return json({ out: await proj().git.unstage((await req.json()).path) });
       if (p === "/api/git/commit") return json({ out: await proj().git.commit((await req.json()).message) });
       if (p === "/api/git/push") return json({ out: await proj().git.push() });
+      if (p === "/api/git/pull") return json({ out: await proj().git.pull() });
       if (p === "/api/git/branches") return json(await proj().git.branches());
       if (p === "/api/git/checkout") return json({ out: await proj().git.checkout((await req.json()).name) });
       if (p === "/api/git/branch") {
@@ -201,7 +202,7 @@ const start = (port: number) => Bun.serve<Data>({
     message(ws, raw) {
       const m = JSON.parse(String(raw));
       if (m.type === "prompt") void ws.data.agent!.run(m.chatId, projects.get(m.project).root, m.text, m.opts, m.images);
-      else if (m.type === "permission") ws.data.agent!.answerPermission(m.id, m.allow);
+      else if (m.type === "permission") ws.data.agent!.answerPermission(m.id, m.allow, m.answers, typeof m.message === "string" ? m.message : undefined, m.mode);
       else if (m.type === "login-start") void accounts.get(m.account).then((a) => ws.data.login!.start(m.mode, a.id, a.dir));
       else if (m.type === "login-code") ws.data.login!.submitCode(m.code);
       else if (m.type === "login-cancel") ws.data.login!.stop();

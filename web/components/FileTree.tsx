@@ -26,6 +26,7 @@ type TreeCtx = {
   commit: (name: string) => void;
   cancel: () => void;
   bump: Record<string, number>;
+  untracked: (project: string, path: string) => boolean;
 };
 const Ctx = createContext<TreeCtx>(null as unknown as TreeCtx);
 
@@ -70,7 +71,7 @@ function Dir({ project, path, depth, version }: { project: string; path: string;
         return (
           <div key={full}>
             {renaming ? <NameInput initial={e.name} depth={depth} folder={e.dir} /> : (
-              <div className={"row" + (sel ? " selected" : "") + (t.cut.has(`${project}:${full}`) ? " cut" : "")} style={{ paddingLeft: 10 + depth * 14 }}
+              <div className={"row" + (sel ? " selected" : "") + (t.untracked(project, full) ? " untracked" : "") + (t.cut.has(`${project}:${full}`) ? " cut" : "")} style={{ paddingLeft: 10 + depth * 14 }}
                 onClick={() => { t.select({ project, path: full, dir: e.dir }); if (e.dir) t.toggle(project, full); else t.openFile(project, full); }}
                 onContextMenu={(ev) => t.menu(ev, { project, path: full, dir: e.dir })}>
                 {e.dir
@@ -208,8 +209,19 @@ export function FileTree({ projects, activeId, versions, status, remote, onActiv
     else if ((e.key === "Delete" || (cmd && e.key === "Backspace")) && !isRoot) { e.preventDefault(); setDel({ t: selected, permanent: false }); }
   };
 
+  // Untracked and gitignored paths per project (git reports untracked folders as "dir/"); the tree greys them out.
+  const [grey, setGrey] = useState<Record<string, string[]>>({});
+  const stamp = projects.map((p) => `${p.id}:${versions[p.id] ?? 0}:${bump[p.id] ?? 0}`).join(",");
+  useEffect(() => {
+    projects.forEach((p) =>
+      api<{ files: { x: string; path: string }[]; ignored?: string[] }>("/api/git/status", { project: p.id })
+        .then((st) => setGrey((g) => ({ ...g, [p.id]: [...st.files.filter((f) => f.x === "?").map((f) => f.path), ...(st.ignored ?? [])] })))
+        .catch(() => setGrey((g) => ({ ...g, [p.id]: [] }))));
+  }, [stamp]);
+
   const ctx: TreeCtx = {
     selected, editing, bump,
+    untracked: (p, path) => (grey[p] ?? []).some((g) => (g.endsWith("/") ? path === g.slice(0, -1) || path.startsWith(g) : path === g)),
     cut: new Set(clip?.mode === "cut" ? clip.items.map((i) => `${i.project}:${i.path}`) : []),
     isOpen: (p, path) => !!openDirs[`${p}:${path}`],
     toggle: (p, path) => setOpenDirs((o) => ({ ...o, [`${p}:${path}`]: !o[`${p}:${path}`] })),

@@ -6,6 +6,7 @@ import { Icon } from "./Icon";
 type File = { x: string; y: string; path: string };
 type Status = { branch: string; files: File[] };
 
+const TITLE: Record<string, string> = { M: "Modified", A: "Added", D: "Deleted", R: "Renamed", C: "Copied", "?": "Untracked" };
 const LABEL: Record<string, string> = { M: "M", A: "A", D: "D", R: "R", C: "C", "?": "U" };
 
 // Split "dir/sub/name.ext" into the name and its (dimmed) folder.
@@ -32,10 +33,10 @@ function Section({ title, files, staged, selected, onSelect, onToggle, onToggleA
         const { name, dir } = split(f.path);
         return (
           <div key={f.path} className={"g-row" + (selected === `${staged}:${f.path}` ? " sel" : "")} onClick={() => onSelect(f)} title={f.path}>
+            <span className={`g-code c-${LABEL[code] ?? code}`} title={TITLE[code] ?? code}>{LABEL[code] ?? code}</span>
             <span className="g-name">{name}</span>
             <span className="g-dir">{dir}</span>
-            <button className="g-icon" title={staged ? "Unstage" : "Stage"} onClick={(e) => { e.stopPropagation(); onToggle(f); }}>{staged ? "−" : "+"}</button>
-            <span className={`g-code c-${LABEL[code] ?? code}`}>{LABEL[code] ?? code}</span>
+            <button className="g-icon" title={staged ? "Unstage" : "Stage"} onClick={(e) => { e.stopPropagation(); onToggle(f); }}><Icon name={staged ? "minus" : "plus"} size={14} /></button>
           </div>
         );
       })}
@@ -51,6 +52,7 @@ export function GitPanel({ project, projectName, version, onOpen }: { project: s
   const [sel, setSel] = useState("");
   const [msg, setMsg] = useState("");
   const [pushing, setPushing] = useState(false);
+  const [pulling, setPulling] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Only "this folder isn't a repo" replaces the panel; any other git error is a message on top of the last good state.
@@ -75,6 +77,7 @@ export function GitPanel({ project, projectName, version, onOpen }: { project: s
 
   const branch = status?.branch ?? "";
   const upstream = branch.includes("...") ? branch.split("...")[1].split(" ")[0] : "";
+  const behind = Number(/behind (\d+)/.exec(branch)?.[1] ?? 0);
   const ahead = Number(/ahead (\d+)/.exec(branch)?.[1] ?? 0);
 
   const select = (f: File, staged: boolean) => {
@@ -93,6 +96,13 @@ export function GitPanel({ project, projectName, version, onOpen }: { project: s
       .catch((e) => setNote({ ok: false, text: e.message }))
       .finally(() => { setPushing(false); refresh(); });
   };
+  const pull = () => {
+    setPulling(true); setNote(null);
+    call("/api/git/pull", { body: {} })
+      .then((r: any) => setNote({ ok: true, text: /already up to date/i.test(r?.out ?? "") ? "Already up to date" : "Pulled latest changes" }))
+      .catch((e) => setNote({ ok: false, text: e.message }))
+      .finally(() => { setPulling(false); refresh(); });
+  };
   // Stages every change (new files included) and commits them in one go.
   const commit = () =>
     run(async () => { await call("/api/git/commit", { body: { message: msg } }); setMsg(""); setDiff(""); setSel(""); setNote({ ok: true, text: "Committed" }); });
@@ -101,14 +111,20 @@ export function GitPanel({ project, projectName, version, onOpen }: { project: s
 
   return (
     <div className="git">
-      <div className="g-proj"><Icon name="folder" size={13} /> {projectName}</div>
-      <div className="g-branch">
-        <BranchMenu project={project} current={status?.branch.replace(/^No commits yet on /, "").split("...")[0].split(" ")[0] ?? ""}
-          onDone={() => { setNote(null); refresh(); }} onError={(text) => setNote({ ok: false, text })} />
-        <button className="g-push" disabled={pushing || !!status?.branch.startsWith("No commits")} onClick={push}
-          title={upstream ? "Push to " + upstream : "Publish branch to origin"}>
-          <Icon name="upload" size={13} /> {pushing ? "Pushing…" : upstream ? `Push${ahead ? ` ${ahead}` : ""}` : "Publish"}
-        </button>
+      <div className="g-head">
+        <div className="g-proj"><Icon name="folder" size={12} /> {projectName}</div>
+        <div className="g-branch">
+          <BranchMenu project={project} current={status?.branch.replace(/^No commits yet on /, "").split("...")[0].split(" ")[0] ?? ""}
+            onDone={() => { setNote(null); refresh(); }} onError={(text) => setNote({ ok: false, text })} />
+          <button className="g-push g-pull" disabled={pulling || pushing || !upstream} onClick={pull}
+            title={upstream ? "Pull from " + upstream : "No upstream branch to pull from"}>
+            <Icon name="download" size={13} /> {pulling ? "Pulling…" : `Pull${behind ? ` ${behind}` : ""}`}
+          </button>
+          <button className="g-push" disabled={pushing || !!status?.branch.startsWith("No commits")} onClick={push}
+            title={upstream ? "Push to " + upstream : "Publish branch to origin"}>
+            <Icon name="upload" size={13} /> {pushing ? "Pushing…" : upstream ? `Push${ahead ? ` ${ahead}` : ""}` : "Publish"}
+          </button>
+        </div>
       </div>
       {note && (
         <div className={note.ok ? "g-note ok" : "g-note err"} onClick={() => setNote(null)}>
@@ -117,7 +133,7 @@ export function GitPanel({ project, projectName, version, onOpen }: { project: s
         </div>
       )}
       <div className="g-commit">
-        <textarea rows={2} placeholder="Commit message" value={msg} onChange={(e) => setMsg(e.target.value)}
+        <textarea rows={2} placeholder="Commit message  (⌘↵ to commit)" value={msg} onChange={(e) => setMsg(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && msg && files.length) commit(); }} />
         <button className="primary" disabled={!msg || !files.length} onClick={commit} title="Stages all changes, then commits">
           Commit all{files.length ? ` (${files.length})` : ""}

@@ -14,6 +14,7 @@ import { createRoot } from "react-dom/client";
 import { api, connect } from "./lib/api";
 import { FileTree, type ProjectInfo } from "./components/FileTree";
 import { Editor } from "./components/Editor";
+import { projectTint } from "./lib/projectColor";
 import { GitPanel } from "./components/GitPanel";
 import { ChatPanel } from "./components/ChatPanel";
 import { TerminalPanel } from "./components/TerminalPanel";
@@ -183,7 +184,7 @@ function App() {
                 onClick={() => { setActive(t.key); setActiveId(t.project); }}
                 onContextMenu={(e) => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY, index: i }); }}>
                 {t.path.split("/").pop()}{t.dirty ? " ●" : ""}
-                {projects.length > 1 && <span className="tab-proj">{nameOf[t.project]}</span>}
+                {projects.length > 1 && <span className="tab-proj" style={projectTint(projects, t.project)}>{nameOf[t.project]}</span>}
                 <span className="x" onClick={(e) => { e.stopPropagation(); close(t.key); }}><Icon name="x" size={13} /></span>
               </div>
             ))}

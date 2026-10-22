@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 
-export type Account = { id: string; name: string; loggedIn: boolean; method: string; email?: string };
+export type Account = { id: string; name: string; loggedIn: boolean; method: string; email?: string; color?: string };
+
+export const ACCOUNT_COLORS = ["#d97757", "#5b9bf5", "#7ec699", "#c586c0", "#e8b86b", "#4ec9c0", "#f06c8c", "#9aa0a6"];
+// The colour chosen for an account, or a stable default by position so accounts differ out of the box.
+export const accountColor = (accounts: Account[], id: string) => {
+  const i = accounts.findIndex((a) => a.id === id);
+  return accounts[i]?.color ?? ACCOUNT_COLORS[Math.max(i, 0) % ACCOUNT_COLORS.length];
+};
 
 // Which Claude account this session runs with. Other sessions can use a different one.
 export function AccountMenu({ accounts, value, onChange, onManage }: {
@@ -24,7 +31,7 @@ export function AccountMenu({ accounts, value, onChange, onManage }: {
           <div className="menu-head"><span>Claude account</span></div>
           {accounts.map((a) => (
             <div key={a.id} className={"mode" + (a.id === value ? " on" : "")} onClick={() => { onChange(a.id); setOpen(false); }}>
-              <span className="ico"><Icon name="user" size={18} /></span>
+              <span className="ico" style={{ color: accountColor(accounts, a.id) }}><Icon name="user" size={18} /></span>
               <span className="txt"><b>{a.name}</b><small>{a.loggedIn ? a.email ?? a.method : "Not signed in"}</small></span>
               {a.id === value && <Icon name="check" size={16} className="check" />}
             </div>
@@ -37,7 +44,7 @@ export function AccountMenu({ accounts, value, onChange, onManage }: {
         </div>
       )}
       <button className="modebtn iconbtn" onClick={() => setOpen(!open)} title={`Account: ${cur?.name ?? "none"}${cur && !cur.loggedIn ? " (not signed in)" : ""}`}>
-        <Icon name="user" size={16} />
+        <span className="acc-badge" style={{ color: accountColor(accounts, value) }}><Icon name="user" size={16} /><span className="lbl">{cur?.name}</span></span>
         {cur && !cur.loggedIn && <span className="acc-warn" />}
       </button>
     </div>

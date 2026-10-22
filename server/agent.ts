@@ -18,7 +18,9 @@ const clip = (t: string, n: number) => {
 };
 
 // macOS notification banner. Text goes in as argv so it can't be interpreted as AppleScript.
+// Inside the Mac app the UI posts the banner itself (so clicking it can open the chat); this is the browser fallback.
 function banner(title: string, body: string, subtitle: string) {
+  if (process.env.VIBECODE_APP) return;
   Bun.spawn(
     ["osascript",
       "-e", "on run argv",
@@ -33,20 +35,20 @@ function banner(title: string, body: string, subtitle: string) {
 // its chatId so the UI can route it even when another session is on screen.
 export function makeAgent(send: Send) {
   const runs = new Map<string, AbortController>();
-  const pending = new Map<string, { chatId: string; resolve: (allow: boolean) => void }>();
+  const pending = new Map<string, { chatId: string; resolve: (r: { allow: boolean; answers?: Record<string, string>; message?: string; mode?: string }) => void }>();
 
   const stop = (chatId: string) => {
     runs.get(chatId)?.abort();
     for (const [id, p] of pending) {
       if (p.chatId !== chatId) continue;
-      p.resolve(false);
+      p.resolve({ allow: false });
       pending.delete(id);
     }
   };
 
   return {
-    answerPermission(id: string, allow: boolean) {
-      pending.get(id)?.resolve(allow);
+    answerPermission(id: string, allow: boolean, answers?: Record<string, string>, message?: string, mode?: string) {
+      pending.get(id)?.resolve({ allow, answers, message, mode });
       pending.delete(id);
     },
     stop,
@@ -94,14 +96,19 @@ export function makeAgent(send: Send) {
               if (opts.sound !== false) {
                 const i = input as Record<string, unknown>;
                 const what = toolName === "ExitPlanMode" ? "Plan ready for review"
+                  : toolName === "AskUserQuestion" ? String((i.questions as any)?.[0]?.question ?? "Claude has a question")
                   : String(i.command ?? i.file_path ?? i.url ?? i.pattern ?? toolName);
                 Bun.spawn(["afplay", "/System/Library/Sounds/Ping.aiff"], { stdio: ["ignore", "ignore", "ignore"] });
-                banner(`Claude needs approval · ${basename(root)}`, `${toolName}: ${clip(what, 120)}`, clip(prompt, 60));
+                banner("Needs your approval", `${toolName}: ${clip(what, 120)}`, basename(root));
               }
-              const allow = await new Promise<boolean>((resolve) => pending.set(id, { chatId, resolve }));
+              const { allow, answers, message, mode } = await new Promise<{ allow: boolean; answers?: Record<string, string>; message?: string; mode?: string }>((resolve) => pending.set(id, { chatId, resolve }));
               return allow
-                ? { behavior: "allow", updatedInput: input }
-                : { behavior: "deny", message: "Denied by user" };
+                ? {
+                  behavior: "allow", updatedInput: answers ? { ...input, answers } : input,
+                  // Approving a plan can also switch the rest of the session to auto-editing.
+                  ...(toolName === "ExitPlanMode" && mode === "edit" ? { updatedPermissions: [{ type: "setMode" as const, mode: "acceptEdits" as const, destination: "session" as const }] } : {}),
+                }
+                : { behavior: "deny", message: message || "Denied by user" };
             },
           },
         });
@@ -135,7 +142,7 @@ export function makeAgent(send: Send) {
         const notify = !abort.signal.aborted && opts.sound !== false;
         if (notify) {
           Bun.spawn(["afplay", "/System/Library/Sounds/Glass.aiff"], { stdio: ["ignore", "ignore", "ignore"] });
-          banner(`Claude finished · ${basename(root)}`, clip(lastText, 140) || "Done", clip(prompt, 60));
+          banner(clip(prompt, 60), clip(lastText, 140) || "Done", basename(root));
         }
         out({ type: "done", notify: notify ? { title: clip(prompt, 60), body: clip(lastText, 140) || "Done" } : undefined });
       }

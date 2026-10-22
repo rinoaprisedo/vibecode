@@ -626,3 +626,113 @@ kbd { font: 10.5px var(--mono); padding: 1px 6px; border-radius: 5px; border: 1p
 .login button.primary:disabled { opacity: 1; }
 .login input:disabled { opacity: .6; }
 .login button.primary.busy:disabled { background: linear-gradient(180deg, var(--accent-hi), var(--accent)); color: #fff; flex-direction: row; justify-content: center; gap: 8px; cursor: progress; }
+
+/* ---------- Auto-growing composer, distinct sent bubble, smooth usage ---------- */
+.composer textarea { height: auto; min-height: 58px; transition: height .12s ease; }
+.msg.user { background: var(--accent-soft); border: 1px solid var(--accent); border-left-width: 3px; }
+.u-fill { transition: width .6s ease, background-color .3s ease; }
+.u-pct, .u-sub { transition: color .3s ease; }
+
+/* ---------- Expandable tool calls ---------- */
+.tool-wrap { max-width: 100%; }
+.tool-wrap .tool { cursor: pointer; user-select: none; }
+.tool-wrap .tool:hover { border-color: var(--border-strong); }
+.tool-wrap .tool > .icon:last-child { margin-left: auto; flex: none; opacity: .6; }
+.tool-note { font-style: normal; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 0; }
+.tool-wrap.open .tool { width: 100%; }
+.tool-body { margin: 4px 0 6px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--elev); font: 11.5px/1.5 var(--mono); max-height: 320px; overflow: auto; }
+.tool-path { color: var(--muted); margin-bottom: 6px; word-break: break-all; }
+.tool-why { color: var(--text); font-family: inherit; margin-bottom: 6px; }
+.tool-pre { margin: 0; white-space: pre-wrap; word-break: break-word; color: var(--text); font: inherit; }
+.tool-diff { white-space: pre-wrap; word-break: break-word; }
+.tool-diff + .tool-diff { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+
+/* ---------- Explorer: untracked / ignored files are dimmed ---------- */
+.row.untracked, .row.untracked .r-name { color: var(--faint); }
+.row.untracked .ico-file, .row.untracked .ico-folder { opacity: .55; }
+.row.untracked.selected { color: var(--muted); }
+
+/* ---------- Image popup ---------- */
+.msg-imgs img, .md img, .thumb img.zoomable { cursor: zoom-in; }
+.lightbox { position: fixed; inset: 0; z-index: 2000; background: rgba(0, 0, 0, .82); display: grid; place-items: center; padding: 32px; animation: lb-in .15s ease-out; cursor: zoom-out; }
+.lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--r-md); box-shadow: 0 20px 60px rgba(0, 0, 0, .6); cursor: default; }
+.lb-x { position: absolute; top: 16px; right: 16px; width: 34px; height: 34px; padding: 0; justify-content: center; border-radius: 50%; background: rgba(255, 255, 255, .12); border: none; color: #fff; }
+.lb-x:hover { background: rgba(255, 255, 255, .22); }
+@keyframes lb-in { from { opacity: 0; } }
+
+/* ---------- Source control redesign: repo card, commit card, status list ---------- */
+.g-head { margin: 4px 12px 10px; padding: 8px 8px 8px 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--elev); }
+.g-head .g-proj { padding: 0 0 4px; font-size: 10.5px; color: var(--muted); letter-spacing: .08em; }
+.g-head .g-proj .icon { color: var(--folder); }
+.g-head .g-branch { padding: 0; margin-left: -8px; }
+.g-head .g-branchbtn { font-size: 13px; }
+.g-head .g-push { padding: 4px 12px; }
+.g-commit { margin: 0 12px 12px; padding: 0; gap: 0; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--elev); overflow: hidden; transition: border-color .12s, box-shadow .12s; }
+.g-commit:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.g-commit textarea { border: none; background: transparent; box-shadow: none; border-radius: 0; padding: 9px 11px; min-height: 58px; }
+.g-commit textarea:focus { box-shadow: none; }
+.g-commit button.primary { margin: 0 8px 8px; border-radius: var(--r-sm); }
+.g-commit button.primary:disabled { opacity: .5; }
+.g-title { padding: 6px 10px 4px 16px; border-top: 1px solid var(--border); margin-top: 4px; }
+.g-title > span:first-child { flex: none; }
+.g-title .g-count { margin-right: auto; }
+.g-row { gap: 8px; padding: 0 6px 0 8px; margin: 0 8px; }
+.g-row .g-code { order: 0; flex: none; background: transparent; }
+.g-row .g-name { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
+.g-row .g-icon { flex: none; }
+
+/* ---------- Pinned prompt must be opaque (nothing scrolls visibly behind it) ---------- */
+.msg.user { background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--bg); }
+.msg.user.pin { background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--bg); z-index: 20; }
+
+/* ---------- Stop pressed: spinner until the run has really ended ---------- */
+.spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border-strong); border-top-color: var(--accent-hi); animation: spin .7s linear infinite; }
+.sendbtn.stopping:disabled { background: var(--elev-2); cursor: progress; opacity: 1; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- Question dock (AskUserQuestion), above the usage meters ---------- */
+.ask-dock { flex: none; margin: 8px 12px 0; padding: 9px 11px; border-radius: var(--r-md); background: var(--elev); border: 1px solid var(--accent); display: flex; flex-direction: column; gap: 8px; max-height: 45%; overflow: auto; }
+.ask-head { display: flex; align-items: flex-start; gap: 8px; }
+.ask-title { flex: 1; font-size: 12.5px; font-weight: 600; line-height: 1.4; }
+.ask-title em { font-style: normal; font-size: 10.5px; margin-right: 7px; padding: 1px 7px; border-radius: 9px; background: var(--accent-soft); color: var(--accent-hi); }
+.ask-step { font-size: 11px; color: var(--muted); }
+.ask-skip { padding: 2px; border: none; background: none; color: var(--muted); }
+.ask-opts { display: flex; flex-direction: column; gap: 4px; }
+.ask-opt { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; padding: 6px 9px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); }
+.ask-opt:hover { border-color: var(--accent); }
+.ask-opt.on { border-color: var(--accent); background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--bg); }
+.ask-opt b { font-weight: 600; font-size: 12px; }
+.ask-opt small { color: var(--muted); font-size: 11px; white-space: normal; }
+.ask-foot { display: flex; gap: 6px; }
+.ask-foot input { flex: 1; min-width: 0; }
+.ask-foot .primary { background: linear-gradient(180deg, var(--accent-hi), var(--accent)); border-color: transparent; color: #fff; }
+.ask-foot .primary:disabled { background: var(--elev-2); color: var(--faint); }
+.plan-dock { max-height: 70%; }
+.plan-body { max-height: 38vh; overflow: auto; padding: 8px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); font-size: 12.5px; }
+
+/* ---------- Composer toolbar adapts to its width: labels when wide, icons when narrow ---------- */
+.composer { container-type: inline-size; container-name: composer; }
+.composer-bar .lbl { margin-left: 6px; white-space: nowrap; }
+.modebtn.iconbtn:has(.lbl) { width: auto; padding: 0 8px; }
+.acc-badge { display: inline-flex; align-items: center; }
+.acc-badge .lbl { color: var(--muted); max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+@container composer (max-width: 560px) { .composer-bar .lbl { display: none; } .modebtn.iconbtn:has(.lbl) { width: 30px; padding: 0; } }
+.acc-colors { display: flex; gap: 4px; align-items: center; }
+.swatch { width: 14px; height: 14px; padding: 0; border-radius: 50%; border: 2px solid transparent; }
+.swatch.on { border-color: var(--text); }
+
+/* ---------- Git header: branch name on its own row (long names truncate), Pull / Push share the row below ---------- */
+.g-head .g-branch { flex-wrap: wrap; gap: 8px; margin-left: 0; }
+.g-head .branchmenu { flex: 1 1 100%; min-width: 0; margin-left: -8px; }
+.g-head .g-branchbtn { display: flex; align-items: center; gap: 6px; max-width: 100%; width: 100%; justify-content: flex-start; }
+.g-head .g-branchbtn .icon { flex: none; }
+.g-head .g-branchbtn span { min-width: 0; flex: 1; text-align: left; }
+.g-head .g-pull, .g-head .g-push { flex: 1 1 0; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
+
+/* ---------- Queued messages (sent while Claude is still working) ---------- */
+.queue { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.q-item { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 6px; background: var(--bg); border: 1px dashed var(--border-strong); font-size: 12px; }
+.q-tag { flex: none; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--accent-hi); }
+.q-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.q-item button { padding: 2px; border: none; background: none; color: var(--muted); }
+.q-item .q-now { color: var(--accent-hi); }

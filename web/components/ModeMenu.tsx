@@ -57,7 +57,7 @@ export function ModeMenu({ value, onChange }: { value: Settings; onChange: (s: S
           </div>
         </div>
       )}
-      <button className="modebtn iconbtn" onClick={() => setOpen(!open)} title={`Mode: ${cur.label}`}><Icon name={cur.icon} size={16} /></button>
+      <button className="modebtn iconbtn" onClick={() => setOpen(!open)} title={`Mode: ${cur.label}`}><Icon name={cur.icon} size={16} /><span className="lbl">{cur.label}</span></button>
     </div>
   );
 }

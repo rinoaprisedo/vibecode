@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 
 type Win = { utilization: number | null; resets_at: string | null } | null | undefined;
@@ -57,8 +57,10 @@ function Item({ label, w }: { label: string; w: Win }) {
 export function UsageBar({ refreshKey, context, account }: { refreshKey: number; context?: Context; account: string }) {
   const [usage, setUsage] = useState<Usage | null>(null);
 
+  const prevAccount = useRef(account);
   useEffect(() => {
-    setUsage(null);
+    // only clear when switching accounts; a plain refresh keeps the old numbers so nothing flashes
+    if (prevAccount.current !== account) { prevAccount.current = account; setUsage(null); }
     let alive = true;
     const load = () => api<Usage>(`/api/usage?account=${account}`).then((u) => alive && setUsage(u)).catch(() => {});
     load();

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api } from "../lib/api";
 import { Icon } from "./Icon";
 import { LoginFlow } from "./LoginFlow";
-import type { Account } from "./AccountMenu";
+import { ACCOUNT_COLORS, accountColor, type Account } from "./AccountMenu";
 import { applyTheme, useTheme } from "../lib/theme";
 
 // Settings → Accounts: add several Claude subscriptions and sign each in or out.
@@ -39,13 +39,19 @@ export function SettingsModal({ accounts, refresh, onClose }: { accounts: Accoun
           {accounts.map((a) => (
             <div key={a.id} className="acc">
               <div className="acc-row">
-                <span className="acc-ico"><Icon name="user" size={16} /></span>
+                <span className="acc-ico" style={{ color: accountColor(accounts, a.id) }}><Icon name="user" size={16} /></span>
                 <div className="acc-main">
                   {renaming?.id === a.id
                     ? <input autoFocus value={renaming.name} onChange={(e) => setRenaming({ id: a.id, name: e.target.value })}
                         onBlur={commitRename} onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") setRenaming(null); }} />
                     : <b className="acc-name" title="Click to rename" onClick={() => setRenaming({ id: a.id, name: a.name })}>{a.name}</b>}
                   <small className={a.loggedIn ? "ok" : "off"}>{a.loggedIn ? `Signed in · ${a.email ?? a.method}` : "Not signed in"}</small>
+                </div>
+                <div className="acc-colors" role="group" aria-label="Account colour">
+                  {ACCOUNT_COLORS.map((c) => (
+                    <button key={c} className={"swatch" + (accountColor(accounts, a.id).toLowerCase() === c ? " on" : "")} style={{ background: c }} title={c}
+                      onClick={() => run(() => api(`/api/accounts/${a.id}`, { method: "PATCH", body: { color: c } }))} />
+                  ))}
                 </div>
                 <div className="acc-actions">
                   <button onClick={() => setSigningIn(signingIn === a.id ? null : a.id)}>{a.loggedIn ? "Switch login" : "Sign in"}</button>

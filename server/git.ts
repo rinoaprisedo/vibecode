@@ -31,11 +31,12 @@ export const makeGit = (root: string) => {
 
   return {
     async status() {
-      const out = await git(["status", "--porcelain=v1", "-b"], true);
+      const out = await git(["status", "--porcelain=v1", "-b", "--ignored=matching"], true);
       const lines = out.split("\n").filter(Boolean);
       const branch = lines[0]?.startsWith("##") ? lines.shift()!.slice(3) : "";
-      const files = lines.map((l) => ({ x: l[0], y: l[1], path: l.slice(3) }));
-      return { branch, files };
+      const all = lines.map((l) => ({ x: l[0], y: l[1], path: l.slice(3) }));
+      // "!!" entries are gitignored paths: not changes, but the explorer greys them out like untracked ones.
+      return { branch, files: all.filter((f) => f.x !== "!"), ignored: all.filter((f) => f.x === "!").map((f) => f.path) };
     },
     diff: (path: string, staged: boolean) => git(["diff", ...(staged ? ["--cached"] : []), "--", path], true),
     stage: (path: string) => git(["add", "--", path]),
@@ -53,6 +54,8 @@ export const makeGit = (root: string) => {
       const hasUpstream = await git(["rev-parse", "--abbrev-ref", "@{u}"], true).then(() => true, () => false);
       return git(hasUpstream ? ["push"] : ["push", "-u", "origin", "HEAD"]);
     },
+    // Fast-forward only: never creates a merge commit or rewrites local work behind your back.
+    pull: () => git(["pull", "--ff-only"]),
     async branches() {
       const out = await git(["branch", "-a", "--format=%(HEAD)|%(refname:short)"], true);
       const rows = out.split("\n").filter(Boolean).map((l) => ({ current: l[0] === "*", name: l.slice(2) }));

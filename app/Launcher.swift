@@ -1,5 +1,6 @@
 import Cocoa
 import WebKit
+import UserNotifications
 
 // Native shell for Vibecode: starts the bundled server, then shows its UI in a window.
 // Layout inside Vibecode.app/Contents/Resources:
@@ -7,7 +8,7 @@ import WebKit
 //   web/                     the UI it serves
 //   claude/claude            the Claude Code binary the Agent SDK drives
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNavigationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNavigationDelegate, WKScriptMessageHandler, UNUserNotificationCenterDelegate {
     private var window: NSWindow!
     private var web: WKWebView!
     private var server: Process?
@@ -19,6 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
         NSApp.appearance = NSAppearance(named: .darkAqua)
         buildMenu()
         buildWindow()
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
         startServer()
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -120,6 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
 
     private func buildWindow() {
         let cfg = WKWebViewConfiguration()
+        cfg.userContentController.add(self, name: "notify")
         web = WKWebView(frame: .zero, configuration: cfg)
         web.uiDelegate = self
         web.navigationDelegate = self
@@ -193,6 +198,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
     @objc private func zoomIn() { web.pageZoom = min(web.pageZoom + 0.1, 2.0) }
     @objc private func zoomOut() { web.pageZoom = max(web.pageZoom - 0.1, 0.6) }
     @objc private func zoomReset() { web.pageZoom = 1.0 }
+
+    // MARK: notifications (posted by the UI; clicking one jumps to that chat session)
+
+    func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.name == "notify", let d = message.body as? [String: Any] else { return }
+        let c = UNMutableNotificationContent()
+        c.title = d["title"] as? String ?? "Vibecode"
+        c.subtitle = d["subtitle"] as? String ?? ""
+        c.body = d["body"] as? String ?? ""
+        c.userInfo = ["chatId": d["chatId"] as? String ?? "", "project": d["project"] as? String ?? ""]
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil))
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler done: @escaping () -> Void) {
+        let info = response.notification.request.content.userInfo
+        if let chat = info["chatId"] as? String, let project = info["project"] as? String, !chat.isEmpty {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            func q(_ s: String) -> String { // JSON-quote for the script
+                (try? String(data: JSONSerialization.data(withJSONObject: [s]), encoding: .utf8))?.dropFirst().dropLast().description ?? "\"\""
+            }
+            web.evaluateJavaScript("window.__vibecodeOpen && window.__vibecodeOpen(\(q(chat)), \(q(project)))")
+        }
+        done()
+    }
+
+    // Show the banner even while Vibecode is frontmost, like the in-app toast does.
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent n: UNNotification, withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
+        done([.banner])
+    }
 
     // MARK: web view delegates
 

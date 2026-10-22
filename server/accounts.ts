@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { mkdir, readFile, writeFile, rm, copyFile, readdir, stat } from "node:fs/promises";
 import { DATA_DIR } from "./paths";
 
-export type Account = { id: string; name: string; dir: string };
+export type Account = { id: string; name: string; dir: string; color?: string };
 
 const ROOT = DATA_DIR;
 const FILE = join(ROOT, "accounts.json");
@@ -16,12 +16,13 @@ let cache: Account[] | undefined;
 async function load(): Promise<Account[]> {
   if (cache) return cache;
   const saved: Account[] = await readFile(FILE, "utf8").then(JSON.parse, () => []);
+  DEFAULT.color = saved.find((a) => a.id === "default")?.color;
   cache = [DEFAULT, ...saved.filter((a) => a.id !== "default")];
   return cache;
 }
 const persist = async () => {
   await mkdir(ROOT, { recursive: true });
-  await writeFile(FILE, JSON.stringify(cache!.filter((a) => a.id !== "default")));
+  await writeFile(FILE, JSON.stringify(cache!.filter((a) => a.id !== "default" || a.color)));
 };
 
 // Each Claude account is its own config dir (login, sessions); a chat picks which one to run with.
@@ -43,6 +44,10 @@ export const accounts = {
   async rename(id: string, name: string) {
     const acc = (await load()).find((a) => a.id === id);
     if (acc && name.trim()) { acc.name = name.trim(); await persist(); }
+  },
+  async setColor(id: string, color: string) {
+    const acc = (await load()).find((a) => a.id === id);
+    if (acc && /^#[0-9a-f]{6}$/i.test(color)) { acc.color = color; await persist(); }
   },
   async remove(id: string) {
     if (id === "default") throw new Error("The default account can't be removed");
