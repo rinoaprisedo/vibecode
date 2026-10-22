@@ -1,0 +1,181 @@
+import "./styles.css";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { api, connect } from "./lib/api";
+import { FileTree, type ProjectInfo } from "./components/FileTree";
+import { Editor } from "./components/Editor";
+import { GitPanel } from "./components/GitPanel";
+import { ChatPanel } from "./components/ChatPanel";
+import { TerminalPanel } from "./components/TerminalPanel";
+import { Icon } from "./components/Icon";
+import { AddFolderMenu } from "./components/AddFolderMenu";
+import { SettingsModal } from "./components/SettingsModal";
+import type { RemoteState } from "./components/RemotePanel";
+import { ContextMenu, tabMenu } from "./components/ContextMenu";
+import { Resizer } from "./components/Resizer";
+import type { Account } from "./components/AccountMenu";
+
+type Tab = { key: string; project: string; path: string; content: string; dirty: boolean };
+const tabKey = (project: string, path: string) => `${project}:${path}`;
+
+function App() {
+  const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [activeId, setActiveId] = useState(() => { try { return localStorage.getItem("vibecode.project") ?? ""; } catch { return ""; } });
+  const [tabs, setTabs] = useState<Tab[]>([]);
+  const [active, setActive] = useState("");
+  const [versions, setVersions] = useState<Record<string, number>>({});
+  const [side, setSide] = useState<"files" | "git">("files");
+  const [termOpen, setTermOpen] = useState(false);
+  const [status, setStatus] = useState<Record<string, "busy" | "waiting">>({});
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [ctx, setCtx] = useState<{ x: number; y: number; index: number } | null>(null);
+  // Column widths (draggable); the file column takes whatever is left.
+  const [w, setW] = useState<{ side: number; term: number; chat: number }>(() => {
+    try { return { side: 264, term: 430, chat: 430, ...JSON.parse(localStorage.getItem("vibecode.widths") ?? "{}") }; }
+    catch { return { side: 264, term: 430, chat: 430 }; }
+  });
+  const base = useRef(0);
+  const [vw, setVw] = useState(window.innerWidth);
+  useEffect(() => { const h = () => setVw(window.innerWidth); window.addEventListener("resize", h); return () => window.removeEventListener("resize", h); }, []);
+  useEffect(() => { try { localStorage.setItem("vibecode.widths", JSON.stringify(w)); } catch {} }, [w]);
+  const [remote, setRemote] = useState<Record<string, RemoteState>>({});
+  useEffect(() => { api<RemoteState[]>("/api/remote").then((l) => setRemote(Object.fromEntries(l.map((r) => [r.project, r])))).catch(() => {}); }, []);
+  const refreshAccounts = useCallback(() => { api<Account[]>("/api/accounts").then(setAccounts).catch(() => {}); }, []);
+  useEffect(() => { refreshAccounts(); }, []);
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+
+  // Ctrl+` toggles the terminal, like VS Code.
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.ctrlKey && e.key === "`") { e.preventDefault(); setTermOpen((o) => !o); } };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
+
+  const loadProjects = useCallback(async () => {
+    const list = await api<ProjectInfo[]>("/api/projects");
+    setProjects(list);
+    // Keep focus on a project that still exists; otherwise fall back to the first one.
+    setActiveId((cur) => (list.some((p) => p.id === cur) ? cur : list[0]?.id ?? ""));
+    // Drop tabs of folders that were closed.
+    setTabs((ts) => ts.filter((t) => list.some((p) => p.id === t.project)));
+  }, []);
+  useEffect(() => { loadProjects(); }, []);
+  useEffect(() => { try { localStorage.setItem("vibecode.project", activeId); } catch {} }, [activeId]);
+
+  // Disk changes (agent edits, git, external): refresh that project's tree/git and reload clean tabs.
+  useEffect(() => {
+    const conn = connect((m) => {
+      if (m.type === "projects-changed") loadProjects();
+      else if (m.type === "remote-status") setRemote((r) => ({ ...r, [m.project]: m }));
+      else if (m.type === "fs-changed") {
+        setVersions((v) => ({ ...v, [m.project]: (v[m.project] ?? 0) + 1 }));
+        for (const t of tabsRef.current) {
+          if (t.project !== m.project || t.dirty) continue;
+          api<{ content: string }>(`/api/file?path=${encodeURIComponent(t.path)}`, { project: t.project })
+            .then(({ content }) => setTabs((cur) => cur.map((c) => (c.key === t.key && !c.dirty && c.content !== content ? { ...c, content } : c))))
+            .catch(() => {});
+        }
+      }
+    });
+    return () => { conn.close(); };
+  }, [loadProjects]);
+
+  const project = projects.find((p) => p.id === activeId);
+
+  const removeFolder = (id: string) => api(`/api/projects/${id}`, { method: "DELETE" }).catch((e) => alert(e.message));
+
+  const open = useCallback(async (projectId: string, path: string) => {
+    const { content } = await api<{ content: string }>(`/api/file?path=${encodeURIComponent(path)}`, { project: projectId }).catch(() => ({ content: "" }));
+    const key = tabKey(projectId, path);
+    setTabs((t) => (t.some((x) => x.key === key) ? t : [...t, { key, project: projectId, path, content, dirty: false }]));
+    setActive(key);
+    setActiveId(projectId); // opening a file focuses its project
+  }, []);
+
+  const tab = tabs.find((t) => t.key === active);
+  const save = () => tab && api("/api/file?path=" + encodeURIComponent(tab.path), { method: "PUT", body: { content: tab.content }, project: tab.project })
+    .then(() => setTabs((ts) => ts.map((t) => (t.key === tab.key ? { ...t, dirty: false } : t))));
+  const closeTabs = (keys: string[]) => {
+    const rest = tabs.filter((t) => !keys.includes(t.key));
+    setTabs(rest);
+    if (keys.includes(active)) setActive(rest.at(-1)?.key ?? "");
+  };
+  const close = (key: string) => closeTabs([key]);
+  const nameOf = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p.name])), [projects]);
+
+  // Default is two columns (explorer | chat); an open file and the terminal slot in between, left to right.
+  const panes = (tabs.length ? 1 : 0) + (termOpen ? 1 : 0);
+  // Saved widths can be too wide for the window: shrink terminal, then chat, then explorer so the file column keeps 240px.
+  const eff = (() => {
+    const e = { ...w };
+    const termFixed = tabs.length > 0 && termOpen;
+    const need = () => e.side + (panes ? e.chat : 0) + (termFixed ? e.term : 0) + (tabs.length ? 240 : termOpen ? 260 : 0);
+    for (const [key, min] of [["term", 260], ["chat", 300], ["side", 200]] as const) {
+      const over = need() - vw;
+      if (over > 0) e[key] = Math.max(min, e[key] - over);
+    }
+    return e;
+  })();
+  const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+  const room = (others: number) => window.innerWidth - others - 240; // keep at least 240px for the file column
+  const grow = (key: "side" | "term" | "chat", dir: 1 | -1, min: number) => (dx: number) =>
+    setW((cur) => {
+      const others = (key !== "side" ? eff.side : 0) + (key !== "chat" && panes ? eff.chat : 0) + (key !== "term" && tabs.length && termOpen ? eff.term : 0);
+      return { ...cur, [key]: clamp(base.current + dir * dx, min, Math.max(min, room(others))) };
+    });
+  return (
+    <div className={"app" + (panes ? "" : " solo")}>
+      <aside className="side" style={{ width: eff.side }}>
+        <div className="sidebar-tabs">
+          <button className={side === "files" ? "on" : ""} onClick={() => setSide("files")}><Icon name="folder" size={14} /> Files</button>
+          <button className={side === "git" ? "on" : ""} onClick={() => setSide("git")}><Icon name="branch" size={14} /> Git</button>
+        </div>
+        <div className="folder">
+          <span className="muted root">{side === "files" ? "Projects" : "Source control"}</span>
+          <AddFolderMenu onAdded={setActiveId} />
+        </div>
+        {side === "files"
+          ? <FileTree projects={projects} activeId={activeId} versions={versions} status={status} remote={remote}
+              onActivate={setActiveId} onRemove={removeFolder} onOpen={open} />
+          : project && <GitPanel key={project.id} project={project.id} projectName={project.name} version={versions[project.id] ?? 0} onOpen={(p) => open(project.id, p)} />}
+        <div className="statusbar">
+          <button className={termOpen ? "on" : ""} onClick={() => setTermOpen((o) => !o)} title="Ctrl+`"><Icon name="terminal" size={14} /> Terminal</button>
+        </div>
+      </aside>
+      <Resizer onStart={() => (base.current = eff.side)} onDrag={grow("side", 1, 200)} />
+      {tab && (
+        <main className="main">
+          <div className="tabs">
+            {tabs.map((t, i) => (
+              <div key={t.key} className={"tab" + (t.key === active ? " on" : "")} title={`${nameOf[t.project] ?? ""}/${t.path}`}
+                onClick={() => { setActive(t.key); setActiveId(t.project); }}
+                onContextMenu={(e) => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY, index: i }); }}>
+                {t.path.split("/").pop()}{t.dirty ? " ●" : ""}
+                {projects.length > 1 && <span className="tab-proj">{nameOf[t.project]}</span>}
+                <span className="x" onClick={(e) => { e.stopPropagation(); close(t.key); }}><Icon name="x" size={13} /></span>
+              </div>
+            ))}
+          </div>
+          <Editor
+            key={tab.key} path={tab.path} content={tab.content} onSave={save}
+            onChange={(v) => setTabs((ts) => ts.map((t) => (t.key === tab.key ? { ...t, dirty: true, content: v } : t)))}
+          />
+        </main>
+      )}
+      {termOpen && project && (<>
+        {tab && <Resizer onStart={() => (base.current = eff.term)} onDrag={grow("term", -1, 260)} />}
+        <TerminalPanel project={project} width={tab ? eff.term : undefined} onClose={() => setTermOpen(false)} />
+      </>)}
+      {panes > 0 && <Resizer onStart={() => (base.current = eff.chat)} onDrag={grow("chat", -1, 300)} />}
+      <ChatPanel projects={projects} projectId={activeId} onFocusProject={setActiveId} onStatus={setStatus}
+        accounts={accounts} refreshAccounts={refreshAccounts} openSettings={() => setSettingsOpen(true)}
+        project={project} remote={project ? remote[project.id] : undefined} width={panes ? eff.chat : undefined} />
+      {ctx && <ContextMenu x={ctx.x} y={ctx.y} onClose={() => setCtx(null)} items={tabMenu(tabs.map((t) => t.key), ctx.index, closeTabs)} />}
+      {settingsOpen && <SettingsModal accounts={accounts} refresh={refreshAccounts} onClose={() => setSettingsOpen(false)} />}
+    </div>
+  );
+}
+
+createRoot(document.getElementById("root")!).render(<App />);
