@@ -25,17 +25,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
 
     // MARK: server
 
+    // In a universal app the Bun server and Claude Code ship once per CPU type ("-arm64" / "-x64"); pick the one for
+    // the slice that is running. Single-architecture builds keep the plain names.
+    private func binary(_ path: String) -> URL {
+        #if arch(arm64)
+        let suffix = "-arm64"
+        #else
+        let suffix = "-x64"
+        #endif
+        let res = Bundle.main.resourceURL!
+        let tagged = res.appendingPathComponent(path + suffix)
+        return FileManager.default.fileExists(atPath: tagged.path) ? tagged : res.appendingPathComponent(path)
+    }
+
     private func startServer() {
         let res = Bundle.main.resourceURL!
         let p = Process()
-        p.executableURL = res.appendingPathComponent("server/vibecode-server")
+        p.executableURL = binary("server/vibecode-server")
         var env = ProcessInfo.processInfo.environment
         env["VIBECODE_APP"] = "1"
         env["NO_OPEN"] = "1"
         env["PORT"] = "47474" // fixed so the web view's origin (and its saved settings) stay the same between launches
         env["VIBECODE_HOME"] = dataDir().path // its own folder: a fresh install starts empty
         env["VIBECODE_WEB"] = res.appendingPathComponent("web").path
-        env["VIBECODE_CLAUDE_BIN"] = res.appendingPathComponent("claude/claude").path
+        env["VIBECODE_CLAUDE_BIN"] = binary("claude/claude").path
         if env["SHELL"] == nil { env["SHELL"] = "/bin/zsh" }
         p.environment = env
         p.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
