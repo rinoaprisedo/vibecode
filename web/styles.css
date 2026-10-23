@@ -250,7 +250,8 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .sendbtn { order: 3; margin-left: auto; width: 30px; height: 30px; padding: 0; justify-content: center; border-radius: 50%; background: linear-gradient(180deg, var(--accent-hi), var(--accent)); border-color: transparent; color: #fff; box-shadow: 0 4px 12px rgba(217, 119, 87, .3); }
 .sendbtn:hover { background: linear-gradient(180deg, var(--accent-hi), var(--accent)); filter: brightness(1.08); }
 .sendbtn:disabled { background: var(--elev-2); color: var(--faint); box-shadow: none; opacity: 1; }
-.sendbtn.stop { background: var(--elev-2); color: var(--text); box-shadow: none; border-color: var(--border-strong); }
+.sendbtn.stop { background: #e5484d; color: #fff; border-color: transparent; box-shadow: 0 2px 8px rgba(229, 72, 77, .35); }
+.sendbtn.stop:hover { background: #ef5a5f; filter: none; }
 
 /* ---------- Login ---------- */
 .login { margin: auto; width: 100%; max-width: 310px; padding: 20px; display: flex; flex-direction: column; gap: 12px; text-align: center; align-items: stretch; }
@@ -692,7 +693,8 @@ kbd { font: 10.5px var(--mono); padding: 1px 6px; border-radius: 5px; border: 1p
 
 /* ---------- Stop pressed: spinner until the run has really ended ---------- */
 .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border-strong); border-top-color: var(--accent-hi); animation: spin .7s linear infinite; }
-.sendbtn.stopping:disabled { background: var(--elev-2); cursor: progress; opacity: 1; }
+.sendbtn.stopping:disabled { background: #e5484d; color: #fff; box-shadow: none; cursor: progress; opacity: .6; }
+.sendbtn.stopping .spin { border-color: rgba(255, 255, 255, .35); border-top-color: #fff; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---------- Question dock (AskUserQuestion), above the usage meters ---------- */
@@ -1157,19 +1159,19 @@ kbd { font: 10.5px var(--mono); padding: 1px 6px; border-radius: 5px; border: 1p
 
 /* ---------- Create from boilerplate wizard ---------- */
 .modal.bp { width: min(540px, calc(100vw - 32px)); }
-.bp-steps { list-style: none; margin: 0; padding: 14px 22px 4px; display: flex; align-items: center; }
+.bp-steps { list-style: none; margin: 0; padding: 16px 18px 4px; display: flex; align-items: center; }
 .bp-steps li { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 12.5px; font-weight: 500; }
 .bp-steps li + li::before { content: ""; width: 40px; height: 2px; margin: 0 12px; border-radius: 2px; background: var(--border-strong); }
 .bp-steps li.done + li::before, .bp-steps li.on::before { background: var(--accent); }
 .bp-dot { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 11.5px; font-weight: 700; background: var(--elev); border: 1px solid var(--border-strong); color: var(--muted); }
 .bp-steps li.on { color: var(--strong); } .bp-steps li.on .bp-dot { background: var(--accent); border-color: transparent; color: #fff; box-shadow: 0 0 0 4px var(--accent-soft); }
 .bp-steps li.done { color: var(--text-2); } .bp-steps li.done .bp-dot { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-hi); }
-.bp-body { padding: 14px 22px 18px; gap: 16px; min-height: 250px; }
+.bp-body { padding: 14px 18px 18px; gap: 14px; min-height: 250px; }
 .bp-intro { margin: 0; color: var(--muted); font-size: 13px; }
 .bp-cards { display: flex; flex-direction: column; gap: 10px; }
-.bp-card { display: flex; gap: 14px; align-items: flex-start; text-align: left; width: 100%; padding: 14px; height: auto; border-radius: var(--r-lg); background: var(--elev); border: 1px solid var(--border); transition: border-color .12s, background .12s; }
-.bp-card:hover { border-color: var(--border-strong); }
-.bp-card.on { border-color: var(--accent); background: var(--accent-soft); }
+.bp .bp-card { display: flex; gap: 14px; align-items: flex-start; text-align: left; width: 100%; padding: 14px; height: auto; border-radius: var(--r-lg); background: var(--elev); border: 1px solid var(--border); transition: border-color .12s, background .12s; }
+.bp .bp-card:hover { border-color: var(--border-strong); }
+.bp .bp-card.on { border-color: var(--accent); background: var(--accent-soft); }
 .bp-ico { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; flex: none; background: var(--tint); color: var(--accent-hi); border: 1px solid var(--border); }
 .bp-ctx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .bp-ctx b { font-size: 14.5px; color: var(--strong); }
@@ -1191,7 +1193,7 @@ kbd { font: 10.5px var(--mono); padding: 1px 6px; border-radius: 5px; border: 1p
 .bp-opt { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; font-size: 12.5px; }
 .bp-opt input { margin-top: 3px; accent-color: var(--accent); }
 .bp-opt span { display: flex; flex-direction: column; gap: 3px; } .bp-opt small { color: var(--muted); line-height: 1.45; font-size: 12px; }
-.bp-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--border); }
+.bp-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 14px 18px; border-top: 1px solid var(--border); }
 .bp-btns { display: flex; gap: 8px; } .bp-hint { font-size: 12px; color: var(--faint); } .bp-hint.ok { color: var(--ok); }
 .bp-prog { display: flex; flex-direction: column; gap: 14px; }
 .bp-banner { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border-radius: var(--r-md); }
