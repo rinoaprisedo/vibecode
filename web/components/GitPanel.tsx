@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { BranchMenu } from "./BranchMenu";
 import { Icon } from "./Icon";
+import { GitFix, classifyGitError, type FixKind } from "./GitFix";
 
 type File = { x: string; y: string; path: string };
 type Status = { branch: string; files: File[] };
@@ -53,7 +54,10 @@ export function GitPanel({ project, projectName, version, onOpen }: { project: s
   const [msg, setMsg] = useState("");
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
-  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  type Note = { ok: boolean; text: string; fix?: FixKind; retry?: () => void; retryLabel?: string };
+  const [note, setNote] = useState<Note | null>(null);
+  // A failed commit / push / pull that git can't do yet (no name, no sign-in, no remote) becomes a guided fix instead of raw text.
+  const fail = (text: string, retry?: () => void, retryLabel = "retry") => setNote({ ok: false, text, fix: retry ? classifyGitError(text) ?? undefined : undefined, retry, retryLabel });
 
   // Only "this folder isn't a repo" replaces the panel; any other git error is a message on top of the last good state.
   const refresh = () =>
@@ -62,7 +66,7 @@ export function GitPanel({ project, projectName, version, onOpen }: { project: s
       .catch((e) => { if (/not a git repository/i.test(e.message)) setNotRepo(true); else setNote({ ok: false, text: e.message }); });
   useEffect(() => { refresh(); }, [version]);
 
-  const run = (fn: () => Promise<unknown>) => fn().then(refresh).catch((e) => { setNote({ ok: false, text: e.message }); refresh(); });
+  const run = (fn: () => Promise<unknown>, retry?: () => void, retryLabel?: string) => fn().then(refresh).catch((e) => { fail(e.message, retry, retryLabel); refresh(); });
 
   if (notRepo) return (
     <div className="git">
@@ -93,19 +97,19 @@ export function GitPanel({ project, projectName, version, onOpen }: { project: s
     setPushing(true); setNote(null);
     call("/api/git/push", { body: {} })
       .then(() => setNote({ ok: true, text: "Pushed" }))
-      .catch((e) => setNote({ ok: false, text: e.message }))
+      .catch((e) => fail(e.message, push, "push"))
       .finally(() => { setPushing(false); refresh(); });
   };
   const pull = () => {
     setPulling(true); setNote(null);
     call("/api/git/pull", { body: {} })
       .then((r: any) => setNote({ ok: true, text: /already up to date/i.test(r?.out ?? "") ? "Already up to date" : "Pulled latest changes" }))
-      .catch((e) => setNote({ ok: false, text: e.message }))
+      .catch((e) => fail(e.message, pull, "pull"))
       .finally(() => { setPulling(false); refresh(); });
   };
   // Stages every change (new files included) and commits them in one go.
   const commit = () =>
-    run(async () => { await call("/api/git/commit", { body: { message: msg } }); setMsg(""); setDiff(""); setSel(""); setNote({ ok: true, text: "Committed" }); });
+    run(async () => { await call("/api/git/commit", { body: { message: msg } }); setMsg(""); setDiff(""); setSel(""); setNote({ ok: true, text: "Committed" }); }, commit, "commit");
   const locked = !!note && !note.ok && /index\.lock|another git process/i.test(note.text);
   const unlock = () => call("/api/git/unlock", { body: {} }).then(() => { setNote(null); refresh(); }).catch((e) => setNote({ ok: false, text: e.message }));
 
@@ -126,7 +130,11 @@ export function GitPanel({ project, projectName, version, onOpen }: { project: s
           </button>
         </div>
       </div>
-      {note && (
+      {note?.fix && note.retry && (
+        <GitFix kind={note.fix} raw={note.text} project={project} retryLabel={note.retryLabel ?? "retry"}
+          onClose={() => setNote(null)} onFixed={() => { const again = note.retry!; setNote(null); again(); }} />
+      )}
+      {note && !(note.fix && note.retry) && (
         <div className={note.ok ? "g-note ok" : "g-note err"} onClick={() => setNote(null)}>
           {locked ? "Git is busy (index.lock exists). If nothing is running, the lock is stale." : note.text}
           {locked && <button className="g-unlock" onClick={(e) => { e.stopPropagation(); unlock(); }}>Remove stale lock & retry</button>}

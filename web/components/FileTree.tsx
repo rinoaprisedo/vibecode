@@ -90,10 +90,12 @@ function Dir({ project, path, depth, version }: { project: string; path: string;
 
 // One section per open folder (like a multi-root workspace). Clicking a section's header focuses
 // that project: chat, git and new terminals follow it. Right-click files and folders for file operations.
-export function FileTree({ projects, activeId, versions, status, remote, onActivate, onRemove, onOpen, onChanged, onRenamed, onDeleted }: {
+export function FileTree({ projects, activeId, versions, status, remote, tunnels, onTunnel, onActivate, onRemove, onOpen, onChanged, onRenamed, onDeleted }: {
   projects: ProjectInfo[]; activeId: string; versions: Record<string, number>;
   status: Record<string, "busy" | "waiting">;
   remote: Record<string, { status: string }>;
+  tunnels: { project: string; state: string }[];
+  onTunnel: (id: string) => void;                                         // open the public-link popup for a project
   onActivate: (id: string) => void; onRemove: (id: string) => void;
   onOpen: (project: string, path: string) => void;
   onChanged: (project: string) => void;                                   // files changed on disk: refresh
@@ -246,6 +248,15 @@ export function FileTree({ projects, activeId, versions, status, remote, onActiv
               <span className="p-name">{p.name}</span>
               {remote[p.id]?.status === "connected" && <span className="p-remote" title="Remote Control is on: reachable from the Claude app"><Icon name="phone" size={12} /></span>}
               {status[p.id] && <span className={"h-dot " + status[p.id]} title={status[p.id] === "busy" ? "Claude is working here" : "Waiting for approval"} />}
+              {(() => {
+                const live = tunnels.filter((t) => t.project === p.id && t.state === "live").length;
+                return (
+                  <span className={"p-play" + (live ? " live" : "")} style={{ cursor: "pointer" }} title={live ? `${live} public link${live > 1 ? "s" : ""} active` : "Share a running port with a public link"}
+                    onClick={(e) => { e.stopPropagation(); onTunnel(p.id); }}>
+                    <Icon name="play" size={12} />{live > 0 && <i>{live}</i>}
+                  </span>
+                );
+              })()}
               <span className="x p-x" title="Remove from Vibecode (the folder and its files stay on disk)" onClick={(e) => { e.stopPropagation(); onRemove(p.id); }}><Icon name="x" size={13} /></span>
             </div>
             {expanded[p.id] && <Dir project={p.id} path="" depth={0} version={versions[p.id] ?? 0} />}

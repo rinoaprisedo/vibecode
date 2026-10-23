@@ -9,6 +9,10 @@ import { makeProjects } from "./projects";
 import { accounts, findDuplicate } from "./accounts";
 import { makeRemote, trustFolder } from "./remote";
 import { images } from "./images";
+import { templates } from "./templates";
+import { makeTunnels } from "./tunnel";
+import { saveCredential, sshKey, makeSshKey } from "./git";
+import { dockerApi, makeDockerLogs } from "./docker";
 import { WEB_DIR } from "./paths";
 import { pasteInto } from "./fs";
 import { relative } from "node:path";
@@ -16,7 +20,7 @@ import { relative } from "node:path";
 const token = crypto.randomUUID();
 const webDir = WEB_DIR;
 
-type Data = { agent?: ReturnType<typeof makeAgent>; login?: ReturnType<typeof makeLogin>; term?: ReturnType<typeof makeTerminals> };
+type Data = { agent?: ReturnType<typeof makeAgent>; login?: ReturnType<typeof makeLogin>; term?: ReturnType<typeof makeTerminals>; dockerLogs?: ReturnType<typeof makeDockerLogs> };
 type WS = import("bun").ServerWebSocket<Data>;
 const sockets = new Set<WS>();
 const broadcast = (m: unknown) => { const t = JSON.stringify(m); for (const s of sockets) s.send(t); };
@@ -30,9 +34,10 @@ if (!process.env.VIBECODE_APP) await projects.add(resolve(process.argv[2] ?? pro
 const anyRoot = () => projects.first()?.root ?? homedir();
 
 const remote = makeRemote(broadcast);
+const tunnels = makeTunnels(broadcast, () => server?.port);
 // On shutdown let Remote Control unregister cleanly before exiting.
 let closing = false;
-const shutdown = () => { if (closing) return; closing = true; void remote.stopAll().finally(() => process.exit(0)); };
+const shutdown = () => { if (closing) return; closing = true; tunnels.stopAll(); void remote.stopAll().finally(() => process.exit(0)); };
 // The packaged app's server must not outlive the window: if the launcher dies without cleaning up (crash, force quit),
 // we get re-parented to launchd (ppid 1) and shut down on our own.
 if (process.env.VIBECODE_APP) setInterval(() => { if (process.ppid === 1) shutdown(); }, 2000);
@@ -84,8 +89,8 @@ const start = (port: number) => Bun.serve<Data>({
       if (p === "/api/remote" && req.method === "GET") return json(remote.list());
       if (p === "/api/remote/start" && req.method === "POST") {
         const proj = projects.get(req.headers.get("x-project"));
-        const { account } = await req.json().catch(() => ({}));
-        return json(remote.start(proj.id, proj.root, proj.name, await accounts.get(account)));
+        const { account, mode } = await req.json().catch(() => ({}));
+        return json(remote.start(proj.id, proj.root, proj.name, await accounts.get(account), mode));
       }
       if (p === "/api/remote/stop" && req.method === "POST") { remote.stop(projects.get(req.headers.get("x-project")).id); return json({ ok: true }); }
       if (p === "/api/remote/trust" && req.method === "POST") {
@@ -106,6 +111,7 @@ const start = (port: number) => Bun.serve<Data>({
       }
       if (p.startsWith("/api/projects/") && req.method === "DELETE") {
         const gone = p.slice("/api/projects/".length);
+        tunnels.stopProject(gone);
         remote.stop(gone);              // its Remote Control goes with it; the folder itself is never touched
         await projects.remove(gone);
         broadcast({ type: "projects-changed" });
@@ -155,6 +161,20 @@ const start = (port: number) => Bun.serve<Data>({
         await proj().fs.write(q.get("path")!, (await req.json()).content);
         return json({ ok: true });
       }
+      if (p.startsWith("/api/tunnel/")) {
+        const act = p.slice("/api/tunnel/".length);
+        if (act === "status") return json(await tunnels.status());
+        if (act === "ports") return json(await tunnels.ports(projects.get(req.headers.get("x-project") ?? q.get("project")).root));
+        if (act === "install" && req.method === "POST") { await tunnels.install(); return json(await tunnels.status()); }
+        if (act === "start" && req.method === "POST") { const b = await req.json().catch(() => ({})); return json(tunnels.start(projects.get(req.headers.get("x-project")).id, Number(b.port))); }
+        if (act === "stop" && req.method === "POST") { const b = await req.json().catch(() => ({})); tunnels.stop(projects.get(req.headers.get("x-project")).id, Number(b.port)); return json({ ok: true }); }
+      }
+      if (p === "/api/templates" && req.method === "GET") return json(await templates.load());
+      if (p === "/api/templates" && req.method === "PUT") return json(await templates.save(await req.json()));
+      if (p.startsWith("/api/docker/")) {
+        const root = (() => { try { return projects.get(req.headers.get("x-project") ?? q.get("project")).root; } catch { return anyRoot(); } })();
+        return json(await dockerApi(p.slice("/api/docker/".length), req.method, q, () => req.json().catch(() => ({})), root));
+      }
       if (p === "/api/git/status") return json(await proj().git.status());
       if (p === "/api/git/diff") return json({ diff: await proj().git.diff(q.get("path")!, q.get("staged") === "1") });
       if (p === "/api/git/stage") return json({ out: await proj().git.stage((await req.json()).path) });
@@ -168,6 +188,17 @@ const start = (port: number) => Bun.serve<Data>({
         const { name, from } = await req.json();
         return json({ out: await proj().git.createBranch(name, from || undefined) });
       }
+      if (p === "/api/git/identity" && req.method === "GET") return json({ ...(await proj().git.identity()), ssh: await sshKey() });
+      if (p === "/api/git/identity" && req.method === "POST") { const b = await req.json(); await proj().git.setIdentity(String(b.name ?? ""), String(b.email ?? ""), b.global !== false); return json({ ok: true }); }
+      if (p === "/api/git/credentials" && req.method === "POST") {
+        const b = await req.json();
+        const remote = (await proj().git.identity()).remote;
+        if (remote?.kind !== "https") throw new Error("This repository does not use an https address");
+        return json({ where: await saveCredential(remote.host, String(b.username ?? ""), String(b.token ?? "")) });
+      }
+      if (p === "/api/git/ssh-key" && req.method === "POST") return json(await makeSshKey((await proj().git.identity()).email));
+      if (p === "/api/git/remote" && req.method === "POST") return json({ out: await proj().git.setRemote(String((await req.json()).url ?? "")) });
+      if (p === "/api/git/test" && req.method === "POST") { await proj().git.testRemote(); return json({ ok: true }); }
       if (p === "/api/git/unlock") return json({ out: await proj().git.removeStaleLock() });
       if (p === "/api/git/init") return json({ out: await proj().git.init() });
     } catch (e) {
@@ -192,11 +223,13 @@ const start = (port: number) => Bun.serve<Data>({
         })();
       });
       ws.data.term = makeTerminals(out);
+      ws.data.dockerLogs = makeDockerLogs(out);
     },
     close(ws) {
       ws.data.agent?.stopAll();
       ws.data.login?.stop();
       ws.data.term?.closeAll();
+      ws.data.dockerLogs?.closeAll();
       sockets.delete(ws);
     },
     message(ws, raw) {
@@ -206,7 +239,9 @@ const start = (port: number) => Bun.serve<Data>({
       else if (m.type === "login-start") void accounts.get(m.account).then((a) => ws.data.login!.start(m.mode, a.id, a.dir));
       else if (m.type === "login-code") ws.data.login!.submitCode(m.code);
       else if (m.type === "login-cancel") ws.data.login!.stop();
-      else if (m.type === "term-open") ws.data.term!.open(m.id, projects.get(m.project).root, m.cols, m.rows);
+      else if (m.type === "term-open") ws.data.term!.open(m.id, projects.get(m.project).root, m.cols, m.rows, m.docker);
+      else if (m.type === "docker-logs-open") ws.data.dockerLogs!.open(m.id, m.container, m.tail);
+      else if (m.type === "docker-logs-close") ws.data.dockerLogs!.close(m.id);
       else if (m.type === "term-input") ws.data.term!.input(m.id, m.data);
       else if (m.type === "term-resize") ws.data.term!.resize(m.id, m.cols, m.rows);
       else if (m.type === "term-close") ws.data.term!.close(m.id);

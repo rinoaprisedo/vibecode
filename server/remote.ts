@@ -8,7 +8,8 @@ export type RemoteState = {
   project: string;
   status: "starting" | "connected" | "error" | "stopped";
   account: string;
-  url?: string;      // opens this machine's environment in the Claude app / claude.ai/code
+  mode: string;      // the IDE's permission mode the phone's sessions run with
+  url?: string;     // opens this machine's environment in the Claude app / claude.ai/code
   session?: string;  // the session the phone is attached to
   error?: string;
   untrusted?: boolean; // Claude Code won't run here until the user accepts its trust dialog themselves
@@ -23,6 +24,8 @@ const ANSI = /\u001b\[[0-9;?]*[A-Za-z]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\
 const RETRY_MS = 20_000;     // Claude keeps a folder's previous registration alive for about a minute after a hard kill
 const MAX_RETRIES = 6;
 const CONNECT_TIMEOUT_MS = 45_000;
+// IDE mode → the CLI's --permission-mode for the sessions the phone opens (same mapping as the chat tabs).
+const MODES = { manual: "default", edit: "acceptEdits", plan: "plan", auto: "auto" } as const;
 
 // Claude Code "Remote Control": a long-running `claude remote-control` per project folder. It registers this
 // Mac with claude.ai so the Claude mobile app / claude.ai/code can open sessions in that folder.
@@ -39,8 +42,9 @@ export function makeRemote(broadcast: (m: unknown) => void) {
   };
   const clearTimer = (project: string) => { clearTimeout(timers.get(project)); timers.delete(project); };
 
-  function launch(project: string, root: string, name: string, account: Account, attempt: number) {
-    const p = Bun.spawn([bin, "remote-control", "--name", `Vibecode · ${name}`], {
+  function launch(project: string, root: string, name: string, account: Account, mode: string, attempt: number) {
+    const permission = MODES[mode as keyof typeof MODES] ?? "default";
+    const p = Bun.spawn([bin, "remote-control", "--name", `Vibecode · ${name}`, "--permission-mode", permission], {
       cwd: root,
       env: { ...process.env, CLAUDE_CONFIG_DIR: account.dir },
       stdin: "pipe", stdout: "pipe", stderr: "pipe",
@@ -102,7 +106,7 @@ export function makeRemote(broadcast: (m: unknown) => void) {
         // The previous registration for this folder hasn't expired yet (e.g. after a restart): keep trying quietly.
         if (attempt < MAX_RETRIES) {
           set(project, { status: "starting", note: `Waiting for the previous Remote Control session on this folder to expire… (retry ${attempt + 1}/${MAX_RETRIES})` });
-          timers.set(project, setTimeout(() => { if (!stopping.has(project)) launch(project, root, name, account, attempt + 1); }, RETRY_MS));
+          timers.set(project, setTimeout(() => { if (!stopping.has(project)) launch(project, root, name, account, mode, attempt + 1); }, RETRY_MS));
           return;
         }
         set(project, { status: "error", note: undefined, error: "This folder is still registered by another Remote Control (a terminal `claude remote-control`, or an earlier session that hasn't expired). Stop it, wait a minute, then press Start." });
@@ -133,12 +137,13 @@ export function makeRemote(broadcast: (m: unknown) => void) {
 
   return {
     list: () => [...states.values()],
-    start(project: string, root: string, name: string, account: Account) {
+    start(project: string, root: string, name: string, account: Account, mode = "manual") {
       if (procs.has(project)) return states.get(project)!;
       stopping.delete(project);
-      states.set(project, { project, status: "starting", account: account.id, root });
+      if (!(mode in MODES)) mode = "manual";
+      states.set(project, { project, status: "starting", account: account.id, mode, root });
       broadcast({ type: "remote-status", ...states.get(project)! });
-      launch(project, root, name, account, 0);
+      launch(project, root, name, account, mode, 0);
       return states.get(project)!;
     },
     stop(project: string) {

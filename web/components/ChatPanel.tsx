@@ -9,6 +9,7 @@ import { UsageBar, type Context } from "./UsageBar";
 import { RemotePanel, type RemoteState } from "./RemotePanel";
 import { ContextMenu, tabMenu } from "./ContextMenu";
 import { ModelMenu } from "./ModelMenu";
+import { TemplateMenu } from "./TemplateMenu";
 import { Icon, type IconName } from "./Icon";
 import { Markdown } from "./Markdown";
 import { projectTint } from "../lib/projectColor";
@@ -43,12 +44,13 @@ type Props = {
   project?: { id: string; name: string };            // focused project, for Remote Control
   remote?: RemoteState;
   width?: number;                                    // set when the chat is a resizable column
+  onRunInTerminal: (title: string, command: string) => void; // terminal templates
 };
 type Tab = { id: string; project: string };
 
 const TABS_KEY = "vibecode.chatTabs";
 
-export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accounts, refreshAccounts, openSettings, project, remote, width }: Props) {
+export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accounts, refreshAccounts, openSettings, project, remote, width, onRunInTerminal }: Props) {
   // Every open chat tab keeps its own state and keeps running in the background.
   const [store, setStore] = useState<Record<string, ChatState>>({});
   const [tabs, setTabs] = useState<Tab[]>([]);
@@ -359,6 +361,17 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
     }
     dispatch(id, text, ids);
   };
+  // Prompt templates: send straight away (queued if Claude is busy), or drop the text into the message box.
+  const sendText = (text: string) => {
+    const id = chatId;
+    if (busy) { setQueue((q) => ({ ...q, [id]: [...(q[id] ?? []), { text, ids: [] }] })); return; }
+    patch(id, (c) => ({ ...c, busy: true, project: cur.project ?? projectId, account: accountId }));
+    dispatch(id, text, []);
+  };
+  const insertText = (text: string) => {
+    setInput(input.trim() ? input.replace(/\s+$/, "") + "\n\n" + text : text);
+    requestAnimationFrame(() => { const el = taRef.current; if (!el) return; el.focus(); el.setSelectionRange(el.value.length, el.value.length); });
+  };
   const answer = (id: string, allow: boolean, answers?: Record<string, string>, message?: string, mode?: string) => {
     conn.current?.send({ type: "permission", id, allow, answers, message, mode });
     patch(chatId, (c) => ({ ...c, items: c.items.map((x) => (x.kind === "permission" && x.id === id ? { ...x, answered: true } : x)) }));
@@ -514,7 +527,8 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
         <ModeMenu value={settings} onChange={update} />
         <ModelMenu account={accountId} value={settings.model} onChange={(model) => update({ ...settings, model })} />
         <AccountMenu accounts={accounts} value={accountId} onChange={pickAccount} onManage={openSettings} />
-        {project && <RemotePanel project={project} accounts={accounts} state={remote} />}
+        <TemplateMenu onSend={sendText} onToChat={insertText} onRun={onRunInTerminal} />
+        {project && <RemotePanel project={project} accounts={accounts} account={accountId} mode={settings.mode} state={remote} />}
         <button className="modebtn soundbtn" title={sound ? "Sound & notification on" : "Sound & notification off"} onClick={toggleSound}><Icon name={sound ? "bell" : "bellOff"} size={15} /></button>
         <span className="spacer" />
         {busy

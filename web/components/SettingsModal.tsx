@@ -21,52 +21,63 @@ export function SettingsModal({ accounts, refresh, onClose }: { accounts: Accoun
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
+      <div className="modal settings">
         <div className="modal-head">
           <h3>Settings</h3>
           <button className="g-icon" style={{ visibility: "visible" }} onClick={onClose}><Icon name="x" size={16} /></button>
         </div>
         <div className="modal-body">
-          <div className="sec-title">Appearance</div>
-          <div className="theme-switch" role="group" aria-label="Theme">
-            <button className={theme === "dark" ? "on" : ""} onClick={() => applyTheme("dark")}><Icon name="moon" size={14} /> Dark</button>
-            <button className={theme === "light" ? "on" : ""} onClick={() => applyTheme("light")}><Icon name="sun" size={14} /> Light</button>
-          </div>
-
-          <div className="sec-title" style={{ marginTop: 8 }}>Claude accounts</div>
-          <p className="muted sec-note">Each account keeps its own sign-in. Pick which one a chat session uses from the account button above the message box, so two sessions can run on two different subscriptions.</p>
-          {error && <div className="err">{error}</div>}
-          {accounts.map((a) => (
-            <div key={a.id} className="acc">
-              <div className="acc-row">
-                <span className="acc-ico" style={{ color: accountColor(accounts, a.id) }}><Icon name="user" size={16} /></span>
-                <div className="acc-main">
-                  {renaming?.id === a.id
-                    ? <input autoFocus value={renaming.name} onChange={(e) => setRenaming({ id: a.id, name: e.target.value })}
-                        onBlur={commitRename} onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") setRenaming(null); }} />
-                    : <b className="acc-name" title="Click to rename" onClick={() => setRenaming({ id: a.id, name: a.name })}>{a.name}</b>}
-                  <small className={a.loggedIn ? "ok" : "off"}>{a.loggedIn ? `Signed in · ${a.email ?? a.method}` : "Not signed in"}</small>
-                </div>
-                <div className="acc-colors" role="group" aria-label="Account colour">
-                  {ACCOUNT_COLORS.map((c) => (
-                    <button key={c} className={"swatch" + (accountColor(accounts, a.id).toLowerCase() === c ? " on" : "")} style={{ background: c }} title={c}
-                      onClick={() => run(() => api(`/api/accounts/${a.id}`, { method: "PATCH", body: { color: c } }))} />
-                  ))}
-                </div>
-                <div className="acc-actions">
-                  <button onClick={() => setSigningIn(signingIn === a.id ? null : a.id)}>{a.loggedIn ? "Switch login" : "Sign in"}</button>
-                  {a.loggedIn && <button onClick={() => run(() => api(`/api/accounts/${a.id}/logout`, { body: {} }))}>Sign out</button>}
-                  {a.id !== "default" && <button className="danger" title="Remove account" onClick={() => run(() => api(`/api/accounts/${a.id}`, { method: "DELETE" }))}><Icon name="x" size={13} /></button>}
-                </div>
-              </div>
-              {signingIn === a.id && (
-                <div className="acc-login">
-                  <LoginFlow account={a.id} onDone={() => { setSigningIn(null); refresh(); }} onChanged={refresh} />
-                </div>
-              )}
+          <section className="set-sec">
+            <div className="set-sec-head"><h4>Appearance</h4><p className="muted">Theme of the whole app.</p></div>
+            <div className="theme-switch" role="group" aria-label="Theme">
+              <button className={theme === "dark" ? "on" : ""} onClick={() => applyTheme("dark")}><Icon name="moon" size={14} /> Dark</button>
+              <button className={theme === "light" ? "on" : ""} onClick={() => applyTheme("light")}><Icon name="sun" size={14} /> Light</button>
             </div>
-          ))}
-          <button className="primary add-acc" onClick={add}><Icon name="plus" size={14} /> Add account</button>
+          </section>
+
+          <section className="set-sec">
+            <div className="set-sec-head">
+              <h4>Claude accounts</h4>
+              <p className="muted">Each account keeps its own sign-in. Pick which one a chat uses from the account button above the message box.</p>
+            </div>
+            {error && <div className="err">{error}</div>}
+            {accounts.map((a) => (
+              <div key={a.id} className="acc">
+                <div className="acc-row">
+                  <span className="acc-ico" style={{ color: accountColor(accounts, a.id) }}><Icon name="user" size={16} /></span>
+                  <div className="acc-main">
+                    {renaming?.id === a.id
+                      ? <input autoFocus value={renaming.name} onChange={(e) => setRenaming({ id: a.id, name: e.target.value })}
+                          onBlur={commitRename} onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") setRenaming(null); }} />
+                      : <b className="acc-name" title="Click to rename" onClick={() => setRenaming({ id: a.id, name: a.name })}>{a.name}</b>}
+                    <small className={a.loggedIn ? "ok" : "off"}>{a.loggedIn ? `Signed in · ${a.email ?? a.method}` : "Not signed in"}</small>
+                  </div>
+                  {a.id !== "default" && <button className="danger acc-remove" title="Remove account" onClick={() => run(() => api(`/api/accounts/${a.id}`, { method: "DELETE" }))}><Icon name="x" size={13} /></button>}
+                </div>
+                <div className="acc-foot">
+                  <div className="acc-colorrow">
+                    <span className="acc-label">Colour</span>
+                    <div className="acc-colors" role="group" aria-label="Account colour">
+                      {ACCOUNT_COLORS.map((c) => (
+                        <button key={c} className={"swatch" + (accountColor(accounts, a.id).toLowerCase() === c ? " on" : "")} style={{ background: c }} title={c}
+                          onClick={() => run(() => api(`/api/accounts/${a.id}`, { method: "PATCH", body: { color: c } }))} />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="acc-actions">
+                    <button onClick={() => setSigningIn(signingIn === a.id ? null : a.id)}>{a.loggedIn ? "Switch login" : "Sign in"}</button>
+                    {a.loggedIn && <button onClick={() => run(() => api(`/api/accounts/${a.id}/logout`, { body: {} }))}>Sign out</button>}
+                  </div>
+                </div>
+                {signingIn === a.id && (
+                  <div className="acc-login">
+                    <LoginFlow account={a.id} onDone={() => { setSigningIn(null); refresh(); }} onChanged={refresh} />
+                  </div>
+                )}
+              </div>
+            ))}
+            <button className="primary add-acc" onClick={add}><Icon name="plus" size={14} /> Add account</button>
+          </section>
         </div>
       </div>
     </div>

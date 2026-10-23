@@ -11,7 +11,7 @@ const TERM_THEME = {
 };
 
 // One xterm.js instance bound to a server-side PTY identified by `id`.
-export function TerminalView({ id, project, active, onExit }: { id: string; project: string; active: boolean; onExit: (id: string) => void }) {
+export function TerminalView({ id, project, active, onExit, docker, command }: { id: string; project: string; active: boolean; onExit: (id: string) => void; docker?: string; command?: string }) {
   const host = useRef<HTMLDivElement>(null);
   const fit = useRef<FitAddon | undefined>(undefined);
   const onExitRef = useRef(onExit);
@@ -33,7 +33,9 @@ export function TerminalView({ id, project, active, onExit }: { id: string; proj
       if (m.type === "term-data") term.write(m.data);
       else if (m.type === "term-exit") onExitRef.current(id);
     });
-    send({ type: "term-open", id, project, cols: term.cols, rows: term.rows });
+    send({ type: "term-open", id, project, cols: term.cols, rows: term.rows, docker });
+    // A template: type the command into the fresh shell and run it (the pty holds the input until the shell is ready).
+    if (command) send({ type: "term-input", id, data: command.replace(/\r?\n/g, "\r") + "\r" });
     const input = term.onData((data) => send({ type: "term-input", id, data }));
     const resize = term.onResize(({ cols, rows }) => send({ type: "term-resize", id, cols, rows }));
     const ro = new ResizeObserver(() => host.current?.offsetParent && addon.fit());

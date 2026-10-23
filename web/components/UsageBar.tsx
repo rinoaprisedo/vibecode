@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 
-type Win = { utilization: number | null; resets_at: string | null } | null | undefined;
-type Usage = { available: boolean; five_hour?: Win; seven_day?: Win };
+export type Win = { utilization: number | null; resets_at: string | null } | null | undefined;
+export type Usage = { available: boolean; five_hour?: Win; seven_day?: Win };
 
 // "3 jam 20 mnt lagi" / "3 hari lagi": time left until the limit window resets.
-const resetsIn = (iso: string | null) => {
+export const resetsIn = (iso: string | null) => {
   if (!iso) return "";
   const mins = Math.round((Date.parse(iso) - Date.now()) / 60000);
   if (mins <= 0) return "sebentar lagi";
@@ -16,7 +16,7 @@ const resetsIn = (iso: string | null) => {
   return `${days} hari${days < 2 && rest ? ` ${rest} jam` : ""} lagi`;
 };
 
-const level = (pct: number) => (pct > 80 ? " hot" : pct >= 60 ? " warm" : " ok"); // <60 green, 60-80 yellow, >80 red
+export const level = (pct: number) => (pct > 80 ? " hot" : pct >= 60 ? " warm" : " ok"); // <60 green, 60-80 yellow, >80 red
 const fmt = (n: number) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
 
 export type Context = { used: number; max: number };

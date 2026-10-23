@@ -15,7 +15,7 @@ echo "==> UI bundle";      bun run build:web
 echo "==> Server binary";  bun build --compile server/index.ts --outfile build/vibecode-server
 rm -f .*.bun-build
 echo "==> Launcher";       swiftc -O app/Launcher.swift -o build/Vibecode-launcher -framework Cocoa -framework WebKit
-echo "==> Icon";           python3 scripts/make-icon.py build/Vibecode.icns
+echo "==> Icon";           [ -f build/Vibecode.icns ] || python3 scripts/make-icon.py build/Vibecode.icns   # keep the existing icon (needs Pillow to redraw)
 
 echo "==> Assemble $APP"
 rm -rf "$APP"

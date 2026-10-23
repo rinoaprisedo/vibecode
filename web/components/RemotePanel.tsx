@@ -3,19 +3,21 @@ import { createPortal } from "react-dom";
 import { api } from "../lib/api";
 import { Icon } from "./Icon";
 import type { Account } from "./AccountMenu";
+import { MODES, type ModeId } from "./ModeMenu";
 
 export type RemoteState = {
-  project: string; status: "starting" | "connected" | "error" | "stopped"; account: string;
+  project: string; status: "starting" | "connected" | "error" | "stopped"; account: string; mode?: string;
   url?: string; session?: string; error?: string; untrusted?: boolean; trustCommand?: string; root?: string; note?: string;
 };
 
 // Remote Control for the focused project: lets the Claude mobile app / claude.ai/code work in this folder.
-export function RemotePanel({ project, accounts, state }: {
-  project: { id: string; name: string }; accounts: Account[]; state?: RemoteState;
+// It runs with the account and permission mode picked for the current chat, so there is nothing to choose here.
+export function RemotePanel({ project, accounts, account, mode, state }: {
+  project: { id: string; name: string }; accounts: Account[]; account: string; mode: ModeId; state?: RemoteState;
 }) {
   const [open, setOpen] = useState(false);
-  const [account, setAccount] = useState(() => { try { return localStorage.getItem("vibecode.account") ?? "default"; } catch { return "default"; } });
   const [busy, setBusy] = useState(false);
+  const [stopping, setStopping] = useState(false); // Stop pressed, until the server reports it is no longer running
   const [copied, setCopied] = useState("");
   const [trustOpen, setTrustOpen] = useState(false);
   const asked = useRef(false); // show the trust popup once per Start attempt
@@ -35,13 +37,18 @@ export function RemotePanel({ project, accounts, state }: {
     if (state?.status === "error" && state.untrusted && !asked.current) { asked.current = true; setTrustOpen(true); }
   }, [state?.status, state?.untrusted]);
   const live = status === "connected" || status === "starting";
+  useEffect(() => { if (!live) setStopping(false); }, [live]);
+  const stop = () => { setStopping(true); call("/api/remote/stop").then(() => { if (!live) setStopping(false); }); };
   const call = (path: string, body: object = {}) => {
     setBusy(true);
     return api(path, { body, project: project.id }).catch(() => {}).finally(() => setBusy(false));
   };
   const copy = (what: string, text?: string) =>
     text && navigator.clipboard.writeText(text).then(() => { setCopied(what); setTimeout(() => setCopied(""), 1500); });
-  const start = () => { asked.current = false; return call("/api/remote/start", { account }); };
+  const start = () => { asked.current = false; return call("/api/remote/start", { account, mode }); };
+  const modeLabel = (id?: string) => MODES.find((m) => m.id === id)?.label ?? "Manual";
+  // The mode is fixed when Remote Control starts; a later change in the chat needs a restart to reach the phone.
+  const stale = status === "connected" && (state?.mode ?? "manual") !== mode;
   // The user confirmed in the popup for this one folder; record it and start Remote Control again.
   const trustAndStart = async () => {
     await call("/api/remote/trust", { account: state?.account ?? account, confirmed: true });
@@ -54,16 +61,17 @@ export function RemotePanel({ project, accounts, state }: {
     <div className="remote" ref={ref}>
       <button className={"modebtn iconbtn" + (status === "connected" ? " live" : "")} onClick={() => setOpen(!open)}
         title={status === "connected" ? "Remote Control: connected" : "Remote Control (Claude app on your phone)"}>
-        <Icon name="phone" size={16} />{status === "connected" && <span className="r-dot" />}
+        <Icon name="phone" size={16} />{stopping ? <span className="spin r-spin" /> : status === "connected" && <span className="r-dot" />}
       </button>
       {open && (
         <div className="menu rmenu">
           <div className="menu-head"><span>Remote Control</span><span className="muted">{project.name}</span></div>
           <p className="r-note">Lets the <b>Claude app</b> (Android/iOS) or claude.ai/code work in this folder, using this Mac. It opens its own session there, separate from the chat tabs in this IDE. File changes it makes show up here live.</p>
 
-          {status === "connected" && (
+          {status === "connected" && !stopping && (
             <div className="r-box ok">
-              <div className="r-line"><span className="r-dot" /> Connected{acc ? <small>{acc.name}</small> : null}</div>
+              <div className="r-line"><span className="r-dot" /> Connected{acc ? <small>{acc.name} · {modeLabel(state?.mode)}</small> : null}</div>
+              {stale && <small>Running in <b>{modeLabel(state?.mode)}</b> mode. Stop and Start to switch to <b>{modeLabel(mode)}</b>.</small>}
               <small>Open the <b>Code</b> tab in the Claude app, or:</small>
               <div className="r-actions">
                 <a href={state?.url} target="_blank" rel="noreferrer"><Icon name="external" size={13} /> Open claude.ai/code</a>
@@ -71,7 +79,8 @@ export function RemotePanel({ project, accounts, state }: {
               </div>
             </div>
           )}
-          {status === "starting" && <div className="r-box"><div className="r-line"><span className="r-dot pulse" /> Connecting…</div>{state?.note && <small>{state.note}</small>}</div>}
+          {stopping && <div className="r-box"><div className="r-line"><span className="spin" /> Stopping Remote Control…</div></div>}
+          {status === "starting" && !stopping && <div className="r-box"><div className="r-line"><span className="r-dot pulse" /> Connecting…</div>{state?.note && <small>{state.note}</small>}</div>}
           {status === "error" && (
             <div className="r-box err">
               {state?.untrusted ? (
@@ -86,15 +95,15 @@ export function RemotePanel({ project, accounts, state }: {
           <div className="menu-sep" />
           {!live ? (
             <div className="r-foot">
-              <select value={account} onChange={(e) => setAccount(e.target.value)} title="Claude account (use the same one as in the app)">
-                {accounts.filter((a) => a.loggedIn).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-              <button className="primary" disabled={busy} onClick={start}>Start</button>
+              <span className="muted" style={{ padding: 0, flex: 1 }} title="The account picked for this chat (use the same one in the Claude app)">
+                {acc?.name ?? account}{acc && !acc.loggedIn ? " — not signed in" : ""} · {modeLabel(mode)}
+              </span>
+              <button className="primary" disabled={busy || (!!acc && !acc.loggedIn)} onClick={start}>Start</button>
             </div>
           ) : (
             <div className="r-foot">
               <span className="muted" style={{ padding: 0, flex: 1 }}>Stops when the IDE server stops.</span>
-              <button disabled={busy} onClick={() => call("/api/remote/stop")}>Stop</button>
+              <button disabled={busy || stopping} className={stopping ? "r-stopping" : ""} onClick={stop}>{stopping ? <><span className="spin" /> Stopping…</> : "Stop"}</button>
             </div>
           )}
         </div>

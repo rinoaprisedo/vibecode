@@ -9,20 +9,23 @@ const FILE = join(ROOT, "accounts.json");
 
 // The original login keeps working: it becomes the "default" account.
 export const DEFAULT_DIR = process.env.VIBECODE_CLAUDE_DIR ?? join(ROOT, "claude");
-const DEFAULT: Account = { id: "default", name: "Account 1", dir: DEFAULT_DIR };
+const DEFAULT_NAME = "Account 1";
+const DEFAULT: Account = { id: "default", name: DEFAULT_NAME, dir: DEFAULT_DIR };
 
 let cache: Account[] | undefined;
 
 async function load(): Promise<Account[]> {
   if (cache) return cache;
   const saved: Account[] = await readFile(FILE, "utf8").then(JSON.parse, () => []);
-  DEFAULT.color = saved.find((a) => a.id === "default")?.color;
+  const def = saved.find((a) => a.id === "default");
+  DEFAULT.color = def?.color;
+  if (def?.name) DEFAULT.name = def.name;
   cache = [DEFAULT, ...saved.filter((a) => a.id !== "default")];
   return cache;
 }
 const persist = async () => {
   await mkdir(ROOT, { recursive: true });
-  await writeFile(FILE, JSON.stringify(cache!.filter((a) => a.id !== "default" || a.color)));
+  await writeFile(FILE, JSON.stringify(cache!.filter((a) => a.id !== "default" || a.color || a.name !== DEFAULT_NAME)));
 };
 
 // Each Claude account is its own config dir (login, sessions); a chat picks which one to run with.

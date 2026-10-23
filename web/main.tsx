@@ -17,7 +17,7 @@ import { Editor } from "./components/Editor";
 import { projectTint } from "./lib/projectColor";
 import { GitPanel } from "./components/GitPanel";
 import { ChatPanel } from "./components/ChatPanel";
-import { TerminalPanel } from "./components/TerminalPanel";
+import { TerminalPanel, type TermRun } from "./components/TerminalPanel";
 import { Icon } from "./components/Icon";
 import { AddFolderMenu } from "./components/AddFolderMenu";
 import { SettingsModal } from "./components/SettingsModal";
@@ -26,6 +26,8 @@ import { ContextMenu, tabMenu } from "./components/ContextMenu";
 import { Resizer } from "./components/Resizer";
 import { QuickOpen } from "./components/QuickOpen";
 import type { Account } from "./components/AccountMenu";
+import { TunnelModal, type TunnelInfo } from "./components/TunnelModal";
+import { DockerPanel, type DockerStatus } from "./components/DockerPanel";
 
 type Tab = { key: string; project: string; path: string; content: string; dirty: boolean };
 const tabKey = (project: string, path: string) => `${project}:${path}`;
@@ -38,10 +40,27 @@ function App() {
   const [versions, setVersions] = useState<Record<string, number>>({});
   const [side, setSide] = useState<"files" | "git">("files");
   const [termOpen, setTermOpen] = useState(false);
+  const [termRun, setTermRun] = useState<TermRun | undefined>();
+  useEffect(() => { if (!termOpen) setTermRun(undefined); }, [termOpen]); // a stale run must not re-execute when the panel is reopened
+  const runInTerminal = useCallback((title: string, command: string) => { setTermRun((r) => ({ seq: (r?.seq ?? 0) + 1, title, command })); setTermOpen(true); }, []);
   const [status, setStatus] = useState<Record<string, "busy" | "waiting">>({});
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
+  const [tunnels, setTunnels] = useState<TunnelInfo[]>([]);
+  const [tunnelFor, setTunnelFor] = useState("");
+  useEffect(() => { api<{ tunnels: TunnelInfo[] }>("/api/tunnel/status").then((s) => setTunnels(s.tunnels)).catch(() => {}); }, []);
+  const [dockerOpen, setDockerOpen] = useState(false);
+  const [docker, setDocker] = useState<DockerStatus | null>(null);
+  // The status-bar badge: how many containers run. Checked quietly; the dashboard itself polls faster while open.
+  useEffect(() => {
+    if (dockerOpen) return;
+    let alive = true;
+    const load = () => { if (!document.hidden) api<DockerStatus>("/api/docker/status").then((s) => alive && setDocker(s)).catch(() => {}); };
+    load();
+    const t = setInterval(load, 20_000);
+    return () => { alive = false; clearInterval(t); };
+  }, [dockerOpen]);
   const [ctx, setCtx] = useState<{ x: number; y: number; index: number } | null>(null);
   // Column widths (draggable); the file column takes whatever is left.
   const [w, setW] = useState<{ side: number; term: number; chat: number }>(() => {
@@ -84,6 +103,11 @@ function App() {
   useEffect(() => {
     const conn = connect((m) => {
       if (m.type === "projects-changed") loadProjects();
+      else if (m.type === "tunnel")
+        setTunnels((l) => {
+          const rest = l.filter((t) => !(t.project === m.project && t.port === m.port));
+          return m.state === "stopped" ? rest : [...rest, { project: m.project, port: m.port, state: m.state, url: m.url, error: m.error }];
+        });
       else if (m.type === "remote-status") setRemote((r) => ({ ...r, [m.project]: m }));
       else if (m.type === "fs-changed") {
         setVersions((v) => ({ ...v, [m.project]: (v[m.project] ?? 0) + 1 }));
@@ -167,12 +191,16 @@ function App() {
           </span>
         </div>
         {side === "files"
-          ? <FileTree projects={projects} activeId={activeId} versions={versions} status={status} remote={remote}
+          ? <FileTree projects={projects} activeId={activeId} versions={versions} status={status} remote={remote} tunnels={tunnels} onTunnel={setTunnelFor}
               onActivate={setActiveId} onRemove={removeFolder} onOpen={open}
               onChanged={(id) => setVersions((v) => ({ ...v, [id]: (v[id] ?? 0) + 1 }))} onRenamed={renameTabs} onDeleted={deleteTabs} />
           : project && <GitPanel key={project.id} project={project.id} projectName={project.name} version={versions[project.id] ?? 0} onOpen={(p) => open(project.id, p)} />}
         <div className="statusbar">
           <button className={termOpen ? "on" : ""} onClick={() => setTermOpen((o) => !o)} title="Ctrl+`"><Icon name="terminal" size={14} /> Terminal</button>
+          <button onClick={() => setDockerOpen(true)} title="Docker">
+            <Icon name="docker" size={14} /> Docker
+            {docker?.state === "running" && <span className={"dk-badge" + (docker.running ? "" : " off")}>{docker.running}</span>}
+          </button>
         </div>
       </aside>
       <Resizer onStart={() => (base.current = eff.side)} onDrag={grow("side", 1, 200)} />
@@ -197,11 +225,11 @@ function App() {
       )}
       {termOpen && project && (<>
         {tab && <Resizer onStart={() => (base.current = eff.term)} onDrag={grow("term", -1, 260)} />}
-        <TerminalPanel project={project} width={tab ? eff.term : undefined} onClose={() => setTermOpen(false)} />
+        <TerminalPanel project={project} width={tab ? eff.term : undefined} onClose={() => setTermOpen(false)} run={termRun} />
       </>)}
       {panes > 0 && <Resizer onStart={() => (base.current = eff.chat)} onDrag={grow("chat", -1, 300)} />}
       <ChatPanel projects={projects} projectId={activeId} onFocusProject={setActiveId} onStatus={setStatus}
-        accounts={accounts} refreshAccounts={refreshAccounts} openSettings={() => setSettingsOpen(true)}
+        accounts={accounts} refreshAccounts={refreshAccounts} openSettings={() => setSettingsOpen(true)} onRunInTerminal={runInTerminal}
         project={project} remote={project ? remote[project.id] : undefined} width={panes ? eff.chat : undefined} />
       {quickOpen && project && (
         <QuickOpen project={project}
@@ -209,6 +237,8 @@ function App() {
           onOpen={(path) => open(project.id, path)} onClose={() => setQuickOpen(false)} />
       )}
       {ctx && <ContextMenu x={ctx.x} y={ctx.y} onClose={() => setCtx(null)} items={tabMenu(tabs.map((t) => t.key), ctx.index, closeTabs)} />}
+      {tunnelFor && projects.find((p) => p.id === tunnelFor) && <TunnelModal project={projects.find((p) => p.id === tunnelFor)!} tunnels={tunnels} onClose={() => setTunnelFor("")} />}
+      {dockerOpen && project && <DockerPanel project={project.id} projectName={project.name} onClose={() => setDockerOpen(false)} onStatus={setDocker} />}
       {settingsOpen && <SettingsModal accounts={accounts} refresh={refreshAccounts} onClose={() => setSettingsOpen(false)} />}
     </div>
   );
