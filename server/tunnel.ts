@@ -145,7 +145,7 @@ export function makeTunnels(broadcast: (m: unknown) => void, ownPort: () => numb
 
     start(project: string, port: number): TunnelInfo {
       if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid port");
-      if (port === ownPort()) throw new Error("That is Vibecode's own port; it is not shared");
+      if (port === ownPort()) throw new Error("That is Vibecoder's own port; it is not shared");
       const k = key(project, port);
       const have = runs.get(k);
       if (have) return have.info;

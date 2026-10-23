@@ -20,7 +20,7 @@ type Info = {
 
 // Where each popular host keeps its token and key settings.
 const HOSTS: Record<string, { name: string; token: string; key: string; tokenHint: string }> = {
-  "github.com": { name: "GitHub", token: "https://github.com/settings/tokens/new?scopes=repo&description=Vibecode", key: "https://github.com/settings/ssh/new", tokenHint: "Tick the “repo” permission." },
+  "github.com": { name: "GitHub", token: "https://github.com/settings/tokens/new?scopes=repo&description=Vibecoder", key: "https://github.com/settings/ssh/new", tokenHint: "Tick the “repo” permission." },
   "gitlab.com": { name: "GitLab", token: "https://gitlab.com/-/user_settings/personal_access_tokens", key: "https://gitlab.com/-/user_settings/ssh_keys", tokenHint: "Tick “write_repository”." },
   "bitbucket.org": { name: "Bitbucket", token: "https://bitbucket.org/account/settings/app-passwords/", key: "https://bitbucket.org/account/settings/ssh-keys/", tokenHint: "Give it repository read and write." },
 };

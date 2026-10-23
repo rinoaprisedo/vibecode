@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds build/universal/Vibecode.app and build/Vibecode-<version>-universal.dmg: one app that runs on Apple Silicon
+# Builds build/universal/Vibecoder.app and build/Vibecoder-<version>-universal.dmg: one app that runs on Apple Silicon
 # and Intel Macs. The Swift launcher is a fat binary; the Bun server and Claude Code ship once per CPU type.
 #
 # Needs the Intel Claude Code binary (same version as the arm64 one), for example:
@@ -8,12 +8,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-0.1.0}"
+VERSION="${VERSION:-1.0.1}"
 ARM_CLAUDE="node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude"
 X64_CLAUDE="${X64_CLAUDE:?set X64_CLAUDE to the Intel Claude Code binary}"
 OUT="build/universal"
-APP="$OUT/Vibecode.app"
-DMG="build/Vibecode-${VERSION}-universal.dmg"
+APP="$OUT/Vibecoder.app"
+DMG="build/Vibecoder-${VERSION}-universal.dmg"
 
 [ -x "$ARM_CLAUDE" ] || { echo "missing $ARM_CLAUDE (run: bun install)"; exit 1; }
 [ -x "$X64_CLAUDE" ] || { echo "missing $X64_CLAUDE"; exit 1; }
@@ -29,28 +29,28 @@ echo "==> Launcher (arm64 + x86_64, one fat binary)"
 swiftc -O app/Launcher.swift -target arm64-apple-macos12  -o "$OUT/launcher-arm64" -framework Cocoa -framework WebKit
 swiftc -O app/Launcher.swift -target x86_64-apple-macos12 -o "$OUT/launcher-x64"   -framework Cocoa -framework WebKit
 lipo -create "$OUT/launcher-arm64" "$OUT/launcher-x64" -output "$OUT/launcher"
-echo "==> Icon";              python3 scripts/make-icon.py "$OUT/Vibecode.icns"
+echo "==> Icon";              python3 scripts/make-icon.py "$OUT/Vibecoder.icns"
 
 echo "==> Assemble $APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/server" "$APP/Contents/Resources/web/dist" "$APP/Contents/Resources/claude"
-cp "$OUT/launcher"                "$APP/Contents/MacOS/Vibecode"
+cp "$OUT/launcher"                "$APP/Contents/MacOS/Vibecoder"
 cp "$OUT/vibecode-server-arm64"   "$APP/Contents/Resources/server/"
 cp "$OUT/vibecode-server-x64"     "$APP/Contents/Resources/server/"
 cp "$ARM_CLAUDE"                  "$APP/Contents/Resources/claude/claude-arm64"
 cp "$X64_CLAUDE"                  "$APP/Contents/Resources/claude/claude-x64"
 cp web/index.html web/loading.gif "$APP/Contents/Resources/web/"
 cp web/dist/main.js web/dist/main.css "$APP/Contents/Resources/web/dist/"
-cp "$OUT/Vibecode.icns"           "$APP/Contents/Resources/Vibecode.icns"
+cp "$OUT/Vibecoder.icns"           "$APP/Contents/Resources/Vibecoder.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleName</key><string>Vibecode</string>
-  <key>CFBundleDisplayName</key><string>Vibecode</string>
+  <key>CFBundleName</key><string>Vibecoder</string>
+  <key>CFBundleDisplayName</key><string>Vibecoder</string>
   <key>CFBundleIdentifier</key><string>com.vibecode.app</string>
-  <key>CFBundleExecutable</key><string>Vibecode</string>
-  <key>CFBundleIconFile</key><string>Vibecode</string>
+  <key>CFBundleExecutable</key><string>Vibecoder</string>
+  <key>CFBundleIconFile</key><string>Vibecoder</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundleVersion</key><string>${VERSION}</string>
@@ -69,7 +69,7 @@ codesign --verify --verbose=1 "$APP"
 echo "==> DMG"
 STAGE="$OUT/dmg"; rm -rf "$STAGE" "$DMG"; mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/"; ln -s /Applications "$STAGE/Applications"
-cp scripts/Install-Vibecode.command "$STAGE/Install Vibecode.command"; chmod +x "$STAGE/Install Vibecode.command"
-hdiutil create -volname "Vibecode" -srcfolder "$STAGE" -ov -format UDZO -imagekey zlib-level=9 "$DMG" >/dev/null
+cp scripts/Install-Vibecoder.command "$STAGE/Install Vibecoder.command"; chmod +x "$STAGE/Install Vibecoder.command"
+hdiutil create -volname "Vibecoder" -srcfolder "$STAGE" -ov -format UDZO -imagekey zlib-level=9 "$DMG" >/dev/null
 rm -rf "$STAGE"
 echo "Done: $DMG ($(du -h "$DMG" | cut -f1))"

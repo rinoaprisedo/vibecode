@@ -116,6 +116,25 @@ export const makeGit = (root: string) => {
     },
     // Fast-forward only: never creates a merge commit or rewrites local work behind your back.
     pull: () => git(["pull", "--ff-only"]),
+    // Recent commits of the current branch, each flagged as pushed or not (compared with its upstream).
+    async log(limit = 60) {
+      const sep = "\x1f";
+      const out = await git(["log", `-n${limit}`, `--format=%H${sep}%h${sep}%an${sep}%at${sep}%s${sep}%D`], true).catch(() => "");
+      const upstream = await git(["rev-parse", "--abbrev-ref", "@{u}"], true).then((x) => x.trim(), () => "");
+      const local = upstream ? new Set((await git(["rev-list", `${upstream}..HEAD`], true).catch(() => "")).split("\n").filter(Boolean)) : null;
+      const commits = out.split("\n").filter(Boolean).map((l) => {
+        const [hash, short, author, at, subject, refs] = l.split(sep);
+        return { hash, short, author, at: Number(at) * 1000, subject, refs: refs ? refs.split(", ").filter(Boolean) : [], pushed: local ? !local.has(hash) : false };
+      });
+      return { upstream, commits };
+    },
+    // Message body and changed files of one commit.
+    async show(hash: string) {
+      if (!/^[0-9a-f]{4,40}$/i.test(hash)) throw new Error("bad commit id");
+      const body = await git(["show", "-s", "--format=%b", hash], true);
+      const files = await git(["show", "--name-status", "--format=", hash], true);
+      return { body: body.trim(), files: files.split("\n").filter(Boolean).map((l) => { const [code, ...rest] = l.split("\t"); return { code: code[0], path: rest.join(" → ") }; }) };
+    },
     async branches() {
       const out = await git(["branch", "-a", "--format=%(HEAD)|%(refname:short)"], true);
       const rows = out.split("\n").filter(Boolean).map((l) => ({ current: l[0] === "*", name: l.slice(2) }));

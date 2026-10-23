@@ -44,7 +44,7 @@ export function makeProjects(onFsChanged: (projectId: string, path: string | nul
   };
 
   async function add(path: string, persist = true): Promise<Project> {
-    const root = resolve(path.replace(/^~(?=$|\/)/, process.env.HOME ?? "~"));
+    const root = resolve(path.replace(/^~(?=$|[\/\\])/, process.env.HOME ?? process.env.USERPROFILE ?? "~"));
     if (!(await isDir(root))) throw new Error(`Not a folder: ${root}`);
     const id = projectId(root);
     const existing = projects.get(id);

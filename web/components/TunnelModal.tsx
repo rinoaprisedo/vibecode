@@ -112,7 +112,7 @@ export function TunnelModal({ project, tunnels, onClose }: { project: { id: stri
             <div className="tn-install">
               <div>
                 <b>cloudflared is needed</b>
-                <small>{status.canInstall ? "A small helper program (about 40 MB) from Cloudflare's official releases, saved inside Vibecode's data folder." : "Install it first, for example: brew install cloudflared"}</small>
+                <small>{status.canInstall ? "A small helper program (about 40 MB) from Cloudflare's official releases, saved inside Vibecoder's data folder." : "Install it first, for example: brew install cloudflared"}</small>
               </div>
               {status.canInstall && <button className="primary" disabled={installing} onClick={install}>{installing ? <><span className="dk-spin" /> Installing…</> : <><Icon name="download" size={13} /> Download</>}</button>}
               {installing && dl && <InstallBar dl={dl} />}
@@ -146,7 +146,7 @@ export function TunnelModal({ project, tunnels, onClose }: { project: { id: stri
 
           <div className="tn-warn">
             <Icon name="bell" size={14} />
-            <span>Anyone who has the link can reach that port, with no password. Stop the tunnel when you are done. The link changes every time, and all tunnels stop when Vibecode closes.</span>
+            <span>Anyone who has the link can reach that port, with no password. Stop the tunnel when you are done. The link changes every time, and all tunnels stop when Vibecoder closes.</span>
           </div>
         </div>
       </div>

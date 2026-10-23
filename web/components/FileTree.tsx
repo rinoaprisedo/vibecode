@@ -195,7 +195,7 @@ export function FileTree({ projects, activeId, versions, status, remote, tunnels
       "sep",
       { label: "Rename…", onClick: () => setEditing({ kind: "rename", project: t.project, path: t.path }), disabled: root },
       { label: "Delete", onClick: () => setDel({ t, permanent: false }), disabled: root },
-      ...(root ? ["sep" as const, { label: "Remove from Vibecode", onClick: () => onRemove(t.project) }] : []),
+      ...(root ? ["sep" as const, { label: "Remove from Vibecoder", onClick: () => onRemove(t.project) }] : []),
     ];
   };
 
@@ -236,7 +236,7 @@ export function FileTree({ projects, activeId, versions, status, remote, tunnels
   return (
     <Ctx.Provider value={ctx}>
       <div className="tree" tabIndex={0} onKeyDown={onKey}>
-        {projects.length === 0 && <div className="empty-hint">No folder open yet.<br />Use <b>Add folder</b> above to start.</div>}
+        {projects.length === 0 && <div className="empty-hint">No folder open yet.<br />Use <b>Create project</b> above to start.</div>}
         {projects.map((p) => (
           <div key={p.id} className="proj">
             <div className={"proj-head" + (p.id === activeId ? " active" : "")} title={p.root}
@@ -257,7 +257,7 @@ export function FileTree({ projects, activeId, versions, status, remote, tunnels
                   </span>
                 );
               })()}
-              <span className="x p-x" title="Remove from Vibecode (the folder and its files stay on disk)" onClick={(e) => { e.stopPropagation(); onRemove(p.id); }}><Icon name="x" size={13} /></span>
+              <span className="x p-x" title="Remove from Vibecoder (the folder and its files stay on disk)" onClick={(e) => { e.stopPropagation(); onRemove(p.id); }}><Icon name="x" size={13} /></span>
             </div>
             {expanded[p.id] && <Dir project={p.id} path="" depth={0} version={versions[p.id] ?? 0} />}
           </div>

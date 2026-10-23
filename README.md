@@ -1,4 +1,4 @@
-# Vibecode
+# Vibecoder
 
 IDE sederhana untuk macOS: file explorer, editor, git, terminal, dan **chat dengan Claude yang bisa mengedit kode** (agentic), semuanya dalam satu jendela. Bisa membuka beberapa folder project sekaligus, dengan sesi chat terpisah per project.
 
@@ -20,17 +20,17 @@ Butuh **macOS 12 atau lebih baru**. Pilih file sesuai Mac Anda:
 
 | File | Untuk |
 |---|---|
-| `Vibecode-…-arm64.dmg` | Mac Apple Silicon (M1/M2/M3/M4) |
-| `Vibecode-…-universal.dmg` | Apple Silicon **dan** Intel (ukuran sekitar 2× lipat) |
+| `Vibecoder-…-arm64.dmg` | Mac Apple Silicon (M1/M2/M3/M4) |
+| `Vibecoder-…-universal.dmg` | Apple Silicon **dan** Intel (ukuran sekitar 2× lipat) |
 
 1. Buka file `.dmg`.
-2. Klik dua kali **Install Vibecode.command**. Ia menyalin app ke *Applications*, membuang tanda karantina, lalu membuka Vibecode.
+2. Klik dua kali **Install Vibecoder.command**. Ia menyalin app ke *Applications*, membuang tanda karantina, lalu membuka Vibecoder.
    Kalau macOS menolak membuka file `.command` itu, klik kanan lalu **Open** (di macOS 15 ke atas: **System Settings → Privacy & Security → Open Anyway**).
-3. Atau manual: seret **Vibecode** ke *Applications*, lalu jalankan di Terminal:
+3. Atau manual: seret **Vibecoder** ke *Applications*, lalu jalankan di Terminal:
 
    ```bash
-   xattr -cr /Applications/Vibecode.app
-   open /Applications/Vibecode.app
+   xattr -cr /Applications/Vibecoder.app
+   open /Applications/Vibecoder.app
    ```
 
 ### Kenapa muncul "The application can't be opened"?
@@ -40,12 +40,12 @@ App ini ditandatangani *ad-hoc* dan belum *notarized* oleh Apple. File yang diun
 Jika dialog yang muncul berbeda atau app tetap tidak terbuka, jalankan ini di Terminal dan lihat pesan error-nya:
 
 ```bash
-/Applications/Vibecode.app/Contents/MacOS/Vibecode
+/Applications/Vibecoder.app/Contents/MacOS/Vibecoder
 ```
 
 ## Mulai memakai
 
-1. Buka Vibecode, klik **Add folder**, pilih folder project. Folder yang pernah dibuka tersimpan dan muncul lagi di peluncuran berikutnya.
+1. Buka Vibecoder, klik **Add folder**, pilih folder project. Folder yang pernah dibuka tersimpan dan muncul lagi di peluncuran berikutnya.
 2. Saat pertama kali chat, pilih **Claude account with subscription** (atau Anthropic Console), buka tautan, lalu tempel kode yang muncul.
 3. Mulai mengetik di kotak chat.
 
@@ -77,7 +77,7 @@ Server hanya bisa dijangkau dari komputer ini dan memakai token acak per sesi.
 ## Membuat `.dmg`
 
 ```bash
-./scripts/build-app.sh             # Apple Silicon -> build/Vibecode-<versi>-arm64.dmg
+./scripts/build-app.sh             # Apple Silicon -> build/Vibecoder-<versi>-arm64.dmg
 ```
 
 Versi universal membutuhkan biner Claude Code untuk Intel (versi yang sama dengan yang arm64):
@@ -87,11 +87,21 @@ npm pack @anthropic-ai/claude-agent-sdk-darwin-x64@<versi> && tar -xzf *.tgz
 X64_CLAUDE=$PWD/package/claude ./scripts/build-universal.sh
 ```
 
+## Membuat versi Windows (.exe)
+
+Bisa dibuat dari Mac (cross-compile), butuh Bun, npm, dan python3:
+
+```bash
+./scripts/build-windows.sh         # -> build/Vibecoder-<versi>-win-x64.zip
+```
+
+Hasilnya folder `Vibecoder/` berisi `Vibecoder.cmd` (klik dua kali), `server/vibecode-server.exe`, `web/`, dan `claude/claude.exe`. UI dibuka di jendela app Microsoft Edge (atau Chrome/Brave); menutup jendela menghentikan server. Data tersimpan di `%APPDATA%\Vibecode`. Terminal di Windows berbasis baris (PowerShell lewat pipe). Belum ditandatangani, jadi SmartScreen akan memberi peringatan.
+
 ## Struktur
 
 ```
 server/   server Bun: file, git, chat (Claude Agent SDK), terminal, akun, remote
 web/      UI React + CodeMirror 6 + xterm.js
 app/      pembungkus macOS (Swift + WebKit) yang menjalankan server
-scripts/  skrip build .app / .dmg
+scripts/  skrip build .app / .dmg / Windows .zip
 ```

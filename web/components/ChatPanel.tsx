@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
 import { api, connect, imageUrl, uploadImage } from "../lib/api";
 import { isImage, MAX_ATTACHMENTS, toAttachment, type Attachment } from "../lib/images";
 import { LoginFlow } from "./LoginFlow";
@@ -19,8 +19,10 @@ const loadSettings = (): Settings => {
   catch { return { mode: "manual", effort: "medium", ultracode: false, model: "" }; }
 };
 
+const autoSwitchOn = () => { try { return localStorage.getItem("vibecode.autoSwitch") !== "off"; } catch { return true; } };
+
 type Item =
-  | { kind: "user" | "text" | "error"; text: string; images?: string[] }
+  | { kind: "user" | "text" | "error" | "notice"; text: string; images?: string[]; at?: number }
   | { kind: "tool"; name: string; input: unknown }
   | { kind: "permission"; id: string; tool: string; input: any; answered?: boolean };
 
@@ -140,7 +142,7 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
   };
   const patch = (id: string, fn: (c: ChatState) => ChatState) =>
     setStore((s) => ({ ...s, [id]: fn(s[id] ?? EMPTY) }));
-  const push = (id: string, item: Item) => patch(id, (c) => ({ ...c, items: [...c.items, item] }));
+  const push = (id: string, item: Item) => patch(id, (c) => ({ ...c, items: [...c.items, item.kind === "user" || item.kind === "text" ? { at: Date.now(), ...item } : item] }));
 
   // ---- tabs ----
   const activate = (id: string) => {
@@ -229,7 +231,24 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
 
   useEffect(() => {
     conn.current = connect((m) => {
-      if (m.type === "context") patch(m.chatId, (c) => ({ ...c, context: { used: m.used, max: m.max } }));
+      if (m.type === "socket-closed") {
+        // Connection to the server dropped: its runs were stopped and nothing more will arrive, so unlock the chats.
+        setStore((st) => Object.fromEntries(Object.entries(st).map(([id, c]) => [id, c.busy || c.items.some((i) => i.kind === "permission" && !i.answered)
+          ? { ...c, busy: false, items: [...c.items.map((i) => (i.kind === "permission" ? { ...i, answered: true } : i)),
+              ...(c.busy ? [{ kind: "error" as const, text: "Connection to the server was lost, so this reply was stopped. Send your message again." }] : [])] }
+          : c])));
+        setStopping({});
+      }
+      else if (m.type === "rejected") {
+        push(m.chatId, { kind: "error", text: "Claude was still working on the previous message, so this one was not sent. Use the queue (Enter while it works) to send it afterwards." });
+      }
+      else if (m.type === "account-switched") {
+        patch(m.chatId, (c) => ({ ...c, account: m.to }));
+        push(m.chatId, { kind: "notice", text: `${m.fromName} hit its usage limit. Switched to ${m.toName} and carried on.` });
+        setUsageKey((k) => k + 1);
+        refreshAccounts();
+      }
+      else if (m.type === "context") patch(m.chatId, (c) => ({ ...c, context: { used: m.used, max: m.max } }));
       else if (m.type === "permission") {
         push(m.chatId, { kind: "permission", id: m.id, tool: m.tool, input: m.input });
         if (soundRef.current) {
@@ -341,7 +360,7 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
     stick.current = true;
     patch(id, (x) => ({ ...x, busy: true, project, account: x.account ?? accountId }));
     push(id, { kind: "user", text, ...(ids.length ? { images: ids } : {}) });
-    conn.current?.send({ type: "prompt", chatId: id, project, text, images: ids, opts: { ...settings, resume: c?.claudeSession, sound, account: c?.account ?? accountId } });
+    conn.current?.send({ type: "prompt", chatId: id, project, text, images: ids, opts: { ...settings, resume: c?.claudeSession, sound, autoSwitch: autoSwitchOn(), account: c?.account ?? accountId } });
   };
   dispatchRef.current = dispatch;
   const send = async () => {
@@ -457,11 +476,11 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
             return <ToolItem key={i} name={it.name} input={it.input} />;
           }
           if (it.kind === "permission") return null; // pending ones sit in the dock above the usage bar
-          if (it.kind === "text") return <div key={i} className="msg text"><Markdown text={it.text} /></div>;
-          if (it.kind === "user") return <UserMessage key={i} text={it.text} images={it.images} pinned={i === lastUser} />;
+          if (it.kind === "text") return <div key={i} className="msg text"><Markdown text={it.text} /><MsgMeta text={it.text} at={it.at} /></div>;
+          if (it.kind === "user") return <UserMessage key={i} text={it.text} at={it.at} images={it.images} pinned={i === lastUser} />;
           return <div key={i} className={`msg ${it.kind}`}>{it.text}</div>;
         })}
-        {busy && <img className="loading" src="/loading.gif?v=4" width={110} height={26} alt="Claude is working…" onLoad={() => stick.current && toBottom()} />}
+        {busy && <Working onShow={() => stick.current && toBottom()} />}
         <div ref={end} />
       </div>
       {pendingPerms.length > 0 && (
@@ -611,9 +630,39 @@ function PlanDock({ plan, onApprove, onRevise }: { plan: string; onApprove: (aut
   );
 }
 
+// "Claude is working" indicator: shimmering text that cycles through a few phrases, with bouncing dots.
+const PHRASES = ["wait, cooking", "dev by rinoaprisedo.com", "rinoaprisedo typing", "thinking it through", "rinoaprisedo read files", "reading the code", "dev by rinoaprisedo.com", "rinoaprisedo found problem", "almost there", "still cooking"];
+function Working({ onShow }: { onShow: () => void }) {
+  const [n, setN] = useState(0);
+  useEffect(() => { onShow(); const t = setInterval(() => setN((x) => (x + 1) % PHRASES.length), 4500); return () => clearInterval(t); }, []);
+  return (
+    <div className="working" role="status" aria-label="Claude is working">
+      <span className="w-spark"><Icon name="sparkle" size={13} /></span>
+      <span key={n} className="w-text">{PHRASES[n]}</span>
+      <span className="w-dots"><i /><i /><i /></span>
+    </div>
+  );
+}
+
+// Small footer under a bubble: time it was sent and a copy button.
+function MsgMeta({ text, at }: { text: string; at?: number }) {
+  const [done, setDone] = useState(false);
+  const copy = (e: ReactMouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard?.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1200); }).catch(() => {});
+  };
+  const time = at ? new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+  return (
+    <div className="msg-meta">
+      {time && <span className="mm-time" title={new Date(at!).toLocaleString()}>{time}</span>}
+      <button className="mm-copy" title={done ? "Copied" : "Copy"} onClick={copy}><Icon name={done ? "check" : "copy"} size={12} /></button>
+    </div>
+  );
+}
+
 // A submitted prompt. Long ones are clamped (click to expand). The newest one is pinned to the top of the chat,
 // so after a long reply you can still see what you asked.
-function UserMessage({ text, images, pinned }: { text: string; images?: string[]; pinned: boolean }) {
+function UserMessage({ text, images, pinned, at }: { text: string; images?: string[]; pinned: boolean; at?: number }) {
   const [open, setOpen] = useState(false);
   const [clamped, setClamped] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -625,6 +674,7 @@ function UserMessage({ text, images, pinned }: { text: string; images?: string[]
     <div className={"msg user" + (pinned ? " pin" : "") + (open ? " open" : "")}>
       {images && <div className="msg-imgs">{images.map((id) => <a key={id} href={imageUrl(id)} target="_blank" rel="noreferrer"><img src={imageUrl(id)} alt="attachment" /></a>)}</div>}
       <div className="u-text" ref={box}>{text}</div>
+      <MsgMeta text={text} at={at} />
       {(clamped || open) && <button className="u-more" onClick={() => setOpen(!open)}>{open ? "Show less" : "Show more"}</button>}
     </div>
   );

@@ -1,40 +1,49 @@
-"""Generates Vibecode.icns: an orange rounded square with the sparkle mark."""
-import math, os, subprocess, sys, tempfile
+"""Generates Vibecoder.icns from Logo-Vibecoder.png: the V mark on a dark rounded square.
+Usage: make-icon.py <out.icns> [logo.png]   (needs Pillow, numpy, scipy)"""
+import os, subprocess, sys, tempfile
+import numpy as np
 from PIL import Image, ImageDraw
+from scipy import ndimage
 
 out = sys.argv[1]
+logo_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(__file__), "..", "Logo-Vibecoder.png")
+
+# Clean the logo: keep only the largest solid shape, dropping the stray specks around it.
+logo = Image.open(logo_path).convert("RGBA")
+a = np.array(logo)
+labels, n = ndimage.label(a[..., 3] > 40)
+if n > 1:
+    sizes = ndimage.sum(np.ones_like(labels), labels, range(1, n + 1))
+    keep = labels == (1 + int(np.argmax(sizes)))
+    keep = ndimage.binary_dilation(keep, iterations=3)  # keep the anti-aliased edge
+    a[..., 3] = np.where(keep, a[..., 3], 0)
+logo = Image.fromarray(a).crop(Image.fromarray(a).getchannel("A").point(lambda v: 255 if v > 40 else 0).getbbox())
+
 S = 1024
 im = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-# macOS icon grid: art sits in an 824px rounded square centred on the canvas
-m = 100
-grad = Image.new("RGBA", (S, S))
-px = grad.load()
+m = 100  # macOS icon grid: art sits in an 824px rounded square centred on the canvas
+bg = Image.new("RGBA", (S, S))
+px = bg.load()
 for y in range(S):
     for x in range(S):
         t = (x + y) / (2 * S)
-        px[x, y] = (int(233 + (185 - 233) * t), int(148 + (85 - 148) * t), int(111 + (58 - 111) * t), 255)
+        v = int(44 + (22 - 44) * t)
+        px[x, y] = (v, v, v + 2, 255)
 mask = Image.new("L", (S, S), 0)
 ImageDraw.Draw(mask).rounded_rectangle([m, m, S - m, S - m], radius=185, fill=255)
-im.paste(grad, (0, 0), mask)
+im.paste(bg, (0, 0), mask)
 
-d = ImageDraw.Draw(im)
-c = S / 2
-for i in range(8):
-    a = i * math.pi / 4
-    long = i % 2 == 0
-    r0, r1 = 70, 290 if long else 215
-    w = 46 if long else 34
-    p0 = (c + math.cos(a) * r0, c + math.sin(a) * r0)
-    p1 = (c + math.cos(a) * r1, c + math.sin(a) * r1)
-    d.line([p0, p1], fill=(255, 255, 255, 255), width=w)
-    for p in (p0, p1):
-        d.ellipse([p[0] - w / 2, p[1] - w / 2, p[0] + w / 2, p[1] + w / 2], fill=(255, 255, 255, 255))
+target = int((S - 2 * m) * 0.58)
+scale = target / max(logo.size)
+logo = logo.resize((round(logo.width * scale), round(logo.height * scale)), Image.LANCZOS)
+im.alpha_composite(logo, ((S - logo.width) // 2, (S - logo.height) // 2))
 
 with tempfile.TemporaryDirectory() as t:
-    iconset = os.path.join(t, "Vibecode.iconset")
+    iconset = os.path.join(t, "Vibecoder.iconset")
     os.makedirs(iconset)
     for size in (16, 32, 128, 256, 512):
         im.resize((size, size), Image.LANCZOS).save(f"{iconset}/icon_{size}x{size}.png")
         im.resize((size * 2, size * 2), Image.LANCZOS).save(f"{iconset}/icon_{size}x{size}@2x.png")
     subprocess.run(["iconutil", "-c", "icns", iconset, "-o", out], check=True)
+im.save(os.path.splitext(out)[0] + "-preview.png")
 print("icon:", out)

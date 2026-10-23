@@ -8,15 +8,17 @@ const EXTRA_DIRS = [
   "/usr/local/bin", "/opt/homebrew/bin", "/Applications/Docker.app/Contents/Resources/bin",
   join(homedir(), ".docker/bin"), join(homedir(), ".orbstack/bin"), join(homedir(), ".rd/bin"), "/usr/bin",
 ];
-const searchDirs = () => [...new Set([...(process.env.PATH ?? "").split(":").filter(Boolean), ...EXTRA_DIRS])];
+const WIN = process.platform === "win32";
+const winDirs = () => [join(process.env.ProgramFiles ?? "C:\\Program Files", "Docker", "Docker", "resources", "bin")];
+const searchDirs = () => [...new Set([...(process.env.PATH ?? "").split(WIN ? ";" : ":").filter(Boolean), ...(WIN ? winDirs() : EXTRA_DIRS)])];
 
 let found: string | undefined;
 export function dockerBin(): string | null {
   if (found && existsSync(found)) return found;
-  found = searchDirs().map((d) => join(d, "docker")).find((f) => existsSync(f));
+  found = searchDirs().map((d) => join(d, WIN ? "docker.exe" : "docker")).find((f) => existsSync(f));
   return found ?? null;
 }
-export const dockerEnv = () => ({ ...process.env, PATH: searchDirs().join(":") });
+export const dockerEnv = () => ({ ...process.env, PATH: searchDirs().join(WIN ? ";" : ":") });
 
 const NAME = /^[\w][\w.\-:/@]*$/;                       // container / image / volume / network references
 const checkName = (s: unknown): string => {
@@ -218,6 +220,10 @@ export async function dockerApi(path: string, method: string, q: URLSearchParams
   const b = await body();
 
   if (path === "launch") {                                  // start Docker Desktop (macOS)
+    if (process.platform === "win32") {
+      Bun.spawn(["cmd", "/c", "start", "", join(process.env.ProgramFiles ?? "C:\\Program Files", "Docker", "Docker", "Docker Desktop.exe")], { stdout: "ignore", stderr: "ignore" });
+      return { ok: true };
+    }
     if (process.platform !== "darwin") throw new Error("Start Docker manually");
     Bun.spawn(["open", "-a", "Docker"], { stdout: "ignore", stderr: "ignore" });
     return { ok: true };

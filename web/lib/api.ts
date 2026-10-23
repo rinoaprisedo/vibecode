@@ -21,7 +21,12 @@ function shared() {
     socket = new WebSocket(`ws://${location.host}/ws?token=${token}`);
     socket.onopen = () => queue.splice(0).forEach((m) => socket!.send(m));
     socket.onmessage = (e) => { const m = JSON.parse(e.data); listeners.forEach((l) => l(m)); };
-    socket.onclose = () => { socket = undefined; };
+    socket.onclose = () => {
+      socket = undefined;
+      // The server stops every run of a closed connection and can't tell us, so tell the listeners ourselves.
+      listeners.forEach((l) => l({ type: "socket-closed" }));
+      setTimeout(shared, 1000); // and reconnect
+    };
   }
   return socket;
 }

@@ -44,7 +44,7 @@ export function makeRemote(broadcast: (m: unknown) => void) {
 
   function launch(project: string, root: string, name: string, account: Account, mode: string, attempt: number) {
     const permission = MODES[mode as keyof typeof MODES] ?? "default";
-    const p = Bun.spawn([bin, "remote-control", "--name", `Vibecode · ${name}`, "--permission-mode", permission], {
+    const p = Bun.spawn([bin, "remote-control", "--name", `Vibecoder · ${name}`, "--permission-mode", permission], {
       cwd: root,
       env: { ...process.env, CLAUDE_CONFIG_DIR: account.dir },
       stdin: "pipe", stdout: "pipe", stderr: "pipe",

@@ -1,3 +1,4 @@
+import { isWin, winPickFolder, findAppBrowser, openUrl } from "./platform";
 import { resolve, join } from "node:path";
 import { homedir } from "node:os";
 import { makeAgent } from "./agent";
@@ -13,7 +14,8 @@ import { templates } from "./templates";
 import { makeTunnels } from "./tunnel";
 import { saveCredential, sshKey, makeSshKey } from "./git";
 import { dockerApi, makeDockerLogs } from "./docker";
-import { WEB_DIR } from "./paths";
+import { WEB_DIR, DATA_DIR } from "./paths";
+import { BOILERPLATES, checkTarget, defaultParent, makeBoilerplate } from "./boilerplate";
 import { pasteInto } from "./fs";
 import { relative } from "node:path";
 
@@ -34,20 +36,30 @@ if (!process.env.VIBECODE_APP) await projects.add(resolve(process.argv[2] ?? pro
 const anyRoot = () => projects.first()?.root ?? homedir();
 
 const remote = makeRemote(broadcast);
+// Create from boilerplate: progress goes to every window as {type:"boilerplate", job, ...}. When it finishes
+// the new folder is opened like any other project.
+const boilerplate = makeBoilerplate((job, p) => {
+  if (p.phase !== "done") { broadcast({ type: "boilerplate", job, ...p }); return; }
+  projects.add(p.root).then(({ id, root, name }) => {
+    broadcast({ type: "projects-changed" });
+    broadcast({ type: "boilerplate", job, phase: "done", id, root, name });
+  }).catch((e) => broadcast({ type: "boilerplate", job, phase: "error", message: String(e.message ?? e) }));
+});
 const tunnels = makeTunnels(broadcast, () => server?.port);
 // On shutdown let Remote Control unregister cleanly before exiting.
 let closing = false;
 const shutdown = () => { if (closing) return; closing = true; tunnels.stopAll(); void remote.stopAll().finally(() => process.exit(0)); };
 // The packaged app's server must not outlive the window: if the launcher dies without cleaning up (crash, force quit),
 // we get re-parented to launchd (ppid 1) and shut down on our own.
-if (process.env.VIBECODE_APP) setInterval(() => { if (process.ppid === 1) shutdown(); }, 2000);
+if (process.env.VIBECODE_APP && process.platform !== "win32") setInterval(() => { if (process.ppid === 1) shutdown(); }, 2000);
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
 // Native macOS folder picker (the server runs on the user's Mac).
-async function pickFolder(): Promise<string | null> {
+async function pickFolder(prompt = "Open Folder"): Promise<string | null> {
+  if (isWin) return winPickFolder(prompt);
   const p = Bun.spawn(
-    ["osascript", "-e", 'POSIX path of (choose folder with prompt "Open Folder")'],
+    ["osascript", "-e", "on run argv", "-e", "POSIX path of (choose folder with prompt (item 1 of argv))", "-e", "end run", prompt],
     { stdout: "pipe", stderr: "ignore" },
   );
   const out = (await new Response(p.stdout).text()).trim();
@@ -101,6 +113,25 @@ const start = (port: number) => Bun.serve<Data>({
         return json({ ok: true });
       }
       if (p === "/api/projects/recent") return json(projects.recent());
+      if (p === "/api/boilerplate" && req.method === "GET")
+        return json({ items: BOILERPLATES, defaultParent: await defaultParent(projects.first() ? resolve(projects.first()!.root, "..") : undefined) });
+      if (p === "/api/boilerplate/pick" && req.method === "POST") {
+        const dir = await pickFolder("Choose where to create the project");
+        return json(dir ? { path: dir.replace(/\/$/, "") } : { cancelled: true });
+      }
+      if (p === "/api/boilerplate/check") return json(await checkTarget(q.get("parent") ?? "", q.get("name") ?? ""));
+      if (p === "/api/boilerplate/create" && req.method === "POST") {
+        const b = await req.json().catch(() => ({}));
+        const job = crypto.randomUUID();
+        try { await boilerplate.start(job, String(b.id), String(b.parent), String(b.name), b.fresh !== false); }
+        catch (e: any) { return json({ error: e.message }, 400); }
+        return json({ job });
+      }
+      if (p === "/api/boilerplate/cancel" && req.method === "POST") {
+        const b = await req.json().catch(() => ({}));
+        boilerplate.cancel(String(b.job));
+        return json({ ok: true });
+      }
       if (p === "/api/projects" && req.method === "POST") {
         const { path } = await req.json().catch(() => ({}));
         const chosen = path || (await pickFolder());
@@ -181,6 +212,8 @@ const start = (port: number) => Bun.serve<Data>({
       if (p === "/api/git/unstage") return json({ out: await proj().git.unstage((await req.json()).path) });
       if (p === "/api/git/commit") return json({ out: await proj().git.commit((await req.json()).message) });
       if (p === "/api/git/push") return json({ out: await proj().git.push() });
+      if (p === "/api/git/log") return json(await proj().git.log());
+      if (p === "/api/git/show") return json(await proj().git.show(q.get("hash") ?? ""));
       if (p === "/api/git/pull") return json({ out: await proj().git.pull() });
       if (p === "/api/git/branches") return json(await proj().git.branches());
       if (p === "/api/git/checkout") return json({ out: await proj().git.checkout((await req.json()).name) });
@@ -252,8 +285,15 @@ const start = (port: number) => Bun.serve<Data>({
 
 // A preferred port keeps the web view's origin stable; if it is taken, let the OS pick one.
 let server: ReturnType<typeof start>;
-try { server = start(Number(process.env.PORT ?? 4747)); } catch { server = start(0); }
+try { server = start(Number(process.env.PORT ?? (isWin ? 47474 : 4747))); } catch { server = start(0); }
 
 const url = `http://127.0.0.1:${server.port}/?token=${token}`;
 console.log(`vibecode: ${projects.list().map((p) => p.root).join(", ")}\n${url}`);
-if (process.env.NO_OPEN !== "1") Bun.spawn(["open", url]);
+if (isWin && !process.env.VIBECODE_NO_WINDOW && process.env.NO_OPEN !== "1" && findAppBrowser()) {
+  // Windows: show the UI in its own chrome-less app window (Edge ships with Windows) with a private profile so the
+  // window, its saved settings and its lifetime belong to Vibecoder. Closing the window stops the server.
+  const profile = join(DATA_DIR, "window");
+  const started = Date.now();
+  const win = Bun.spawn([findAppBrowser()!, `--app=${url}`, `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--window-size=1440,900"], { stdio: ["ignore", "ignore", "ignore"] });
+  void win.exited.then(() => { if (Date.now() - started > 3000) shutdown(); });
+} else if (process.env.NO_OPEN !== "1") openUrl(url);

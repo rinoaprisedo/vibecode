@@ -6,6 +6,42 @@ import { GitFix, classifyGitError, type FixKind } from "./GitFix";
 
 type File = { x: string; y: string; path: string };
 type Status = { branch: string; files: File[] };
+type Commit = { hash: string; short: string; author: string; at: number; subject: string; refs: string[]; pushed: boolean };
+
+const ago = (t: number) => {
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 60) return "just now";
+  const u: [number, string][] = [[60, "min"], [3600, "h"], [86400, "d"], [604800, "w"], [2629800, "mo"], [31557600, "y"]];
+  let i = 0; while (i + 1 < u.length && s >= u[i + 1][0]) i++;
+  return `${Math.floor(s / u[i][0])} ${u[i][1]} ago`;
+};
+
+// One commit in the history: subject, author, time, and whether it has been pushed. Click for message body and files.
+function CommitRow({ c, call }: { c: Commit; call: <T = any>(path: string) => Promise<T> }) {
+  const [open, setOpen] = useState(false);
+  const [more, setMore] = useState<{ body: string; files: { code: string; path: string }[] } | null>(null);
+  const toggle = () => {
+    setOpen(!open);
+    if (!more) call(`/api/git/show?hash=${c.hash}`).then(setMore).catch(() => setMore({ body: "", files: [] }));
+  };
+  return (
+    <div className={"g-commitrow" + (open ? " open" : "")}>
+      <div className="gc-main" onClick={toggle} title={`${c.subject}\n${c.author} · ${new Date(c.at).toLocaleString()}`}>
+        <span className={"gc-dot" + (c.pushed ? "" : " local")} title={c.pushed ? "Pushed" : "Not pushed yet"} />
+        <span className="gc-subject">{c.subject}</span>
+        {c.refs.filter((r) => r !== "HEAD").slice(0, 2).map((r) => <em key={r} className="gc-ref">{r.replace("HEAD -> ", "")}</em>)}
+        <span className="gc-hash" onClick={(e) => { e.stopPropagation(); navigator.clipboard?.writeText(c.hash).catch(() => {}); }} title="Copy full hash">{c.short}</span>
+      </div>
+      <div className="gc-sub">{c.author} · {ago(c.at)}{c.pushed ? "" : " · not pushed"}</div>
+      {open && more && (
+        <div className="gc-detail">
+          {more.body && <pre>{more.body}</pre>}
+          {more.files.map((f) => <div key={f.path} className="gc-file"><span className={`g-code c-${f.code}`}>{f.code}</span><span>{f.path}</span></div>)}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const TITLE: Record<string, string> = { M: "Modified", A: "Added", D: "Deleted", R: "Renamed", C: "Copied", "?": "Untracked" };
 const LABEL: Record<string, string> = { M: "M", A: "A", D: "D", R: "R", C: "C", "?": "U" };
@@ -54,6 +90,8 @@ export function GitPanel({ project, projectName, version, onOpen }: { project: s
   const [msg, setMsg] = useState("");
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
+  const [history, setHistory] = useState<{ upstream: string; commits: Commit[] } | null>(null);
+  const [histOpen, setHistOpen] = useState(true);
   type Note = { ok: boolean; text: string; fix?: FixKind; retry?: () => void; retryLabel?: string };
   const [note, setNote] = useState<Note | null>(null);
   // A failed commit / push / pull that git can't do yet (no name, no sign-in, no remote) becomes a guided fix instead of raw text.
@@ -62,7 +100,7 @@ export function GitPanel({ project, projectName, version, onOpen }: { project: s
   // Only "this folder isn't a repo" replaces the panel; any other git error is a message on top of the last good state.
   const refresh = () =>
     call<Status>("/api/git/status")
-      .then((s) => { setStatus(s); setNotRepo(false); })
+      .then((s) => { setStatus(s); setNotRepo(false); call("/api/git/log").then(setHistory).catch(() => {}); })
       .catch((e) => { if (/not a git repository/i.test(e.message)) setNotRepo(true); else setNote({ ok: false, text: e.message }); });
   useEffect(() => { refresh(); }, [version]);
 
@@ -119,7 +157,7 @@ export function GitPanel({ project, projectName, version, onOpen }: { project: s
         <div className="g-proj"><Icon name="folder" size={12} /> {projectName}</div>
         <div className="g-branch">
           <BranchMenu project={project} current={status?.branch.replace(/^No commits yet on /, "").split("...")[0].split(" ")[0] ?? ""}
-            onDone={() => { setNote(null); refresh(); }} onError={(text) => setNote({ ok: false, text })} />
+            onDone={(message) => { setNote(message ? { ok: true, text: message } : null); refresh(); }} onError={(text) => setNote({ ok: false, text })} />
           <button className="g-push g-pull" disabled={pulling || pushing || !upstream} onClick={pull}
             title={upstream ? "Pull from " + upstream : "No upstream branch to pull from"}>
             <Icon name="download" size={13} /> {pulling ? "Pulling…" : `Pull${behind ? ` ${behind}` : ""}`}
@@ -152,6 +190,17 @@ export function GitPanel({ project, projectName, version, onOpen }: { project: s
       <Section title="Changes" files={changes} staged={false} selected={sel}
         onSelect={(f) => select(f, false)} onToggle={(f) => toggle(f, false)} onToggleAll={() => toggleAll(changes, false)} />
       {!files.length && <div className="muted">No changes</div>}
+      {history && history.commits.length > 0 && (
+        <div className="g-section g-history">
+          <div className="g-title" onClick={() => setHistOpen(!histOpen)} style={{ cursor: "pointer" }}>
+            <Icon name={histOpen ? "chevronDown" : "chevronRight"} size={12} />
+            <span>Commits</span>
+            <span className="g-count">{history.commits.length}</span>
+            {history.commits.some((c) => !c.pushed) && <span className="gc-pending">{history.commits.filter((c) => !c.pushed).length} to push</span>}
+          </div>
+          {histOpen && history.commits.map((c) => <CommitRow key={c.hash} c={c} call={call} />)}
+        </div>
+      )}
       {diff && (
         <pre className="diff">
           {diff.split("\n").map((l, i) => (

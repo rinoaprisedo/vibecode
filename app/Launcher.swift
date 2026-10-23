@@ -2,8 +2,8 @@ import Cocoa
 import WebKit
 import UserNotifications
 
-// Native shell for Vibecode: starts the bundled server, then shows its UI in a window.
-// Layout inside Vibecode.app/Contents/Resources:
+// Native shell for Vibecoder: starts the bundled server, then shows its UI in a window.
+// Layout inside Vibecoder.app/Contents/Resources:
 //   server/vibecode-server   the compiled Bun server
 //   web/                     the UI it serves
 //   claude/claude            the Claude Code binary the Agent SDK drives
@@ -78,7 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
             DispatchQueue.main.async {
                 guard let self, !self.quitting else { return }
                 let a = NSAlert()
-                a.messageText = "Vibecode's server stopped"
+                a.messageText = "Vibecoder's server stopped"
                 a.informativeText = "Exit code \(proc.terminationStatus). Details are in ~/Library/Application Support/Vibecode/server.log."
                 a.runModal()
                 NSApp.terminate(nil)
@@ -90,7 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
             guard let self, !self.loaded else { return }
-            let a = NSAlert(); a.messageText = "Vibecode is taking too long to start"
+            let a = NSAlert(); a.messageText = "Vibecoder is taking too long to start"
             a.informativeText = "Check ~/Library/Application Support/Vibecode/server.log."; a.runModal()
         }
     }
@@ -134,12 +134,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1500, height: 920),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
                           backing: .buffered, defer: false)
-        window.title = "Vibecode"
+        window.title = "Vibecoder"
         window.backgroundColor = bg
         window.contentView = web
         window.minSize = NSSize(width: 900, height: 560)
-        window.setFrameAutosaveName("VibecodeMain")
-        if !window.setFrameUsingName("VibecodeMain") { window.center() }
+        window.setFrameAutosaveName("VibecoderMain")
+        if !window.setFrameUsingName("VibecoderMain") { window.center() }
         window.makeKeyAndOrderFront(nil)
     }
 
@@ -160,13 +160,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
             main.addItem(item)
         }
 
-        submenu("Vibecode") { m in
-            add(m, "About Vibecode", #selector(NSApplication.orderFrontStandardAboutPanel(_:)))
+        submenu("Vibecoder") { m in
+            add(m, "About Vibecoder", #selector(NSApplication.orderFrontStandardAboutPanel(_:)))
             m.addItem(.separator())
-            add(m, "Hide Vibecode", #selector(NSApplication.hide(_:)), "h")
+            add(m, "Hide Vibecoder", #selector(NSApplication.hide(_:)), "h")
             add(m, "Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option])
             m.addItem(.separator())
-            add(m, "Quit Vibecode", #selector(NSApplication.terminate(_:)), "q")
+            add(m, "Quit Vibecoder", #selector(NSApplication.terminate(_:)), "q")
         }
         submenu("Edit") { m in
             add(m, "Undo", Selector(("undo:")), "z")
@@ -204,11 +204,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == "notify", let d = message.body as? [String: Any] else { return }
         let c = UNMutableNotificationContent()
-        c.title = d["title"] as? String ?? "Vibecode"
+        c.title = d["title"] as? String ?? "Vibecoder"
         c.subtitle = d["subtitle"] as? String ?? ""
         c.body = d["body"] as? String ?? ""
         c.userInfo = ["chatId": d["chatId"] as? String ?? "", "project": d["project"] as? String ?? ""]
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil))
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            // Not allowed (or never asked, as can happen with an ad-hoc signed app): fall back to a plain macOS banner
+            // so the user is still told when Claude finishes. Clicking that one can't jump to the chat.
+            guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else {
+                self.fallbackBanner(c.title, c.subtitle, c.body); return
+            }
+            center.add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil)) { err in
+                if err != nil { self.fallbackBanner(c.title, c.subtitle, c.body) }
+            }
+        }
+    }
+
+    // Text goes in as argv so it can't be interpreted as AppleScript.
+    private func fallbackBanner(_ title: String, _ subtitle: String, _ body: String) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        p.arguments = ["-e", "on run argv", "-e", "display notification (item 1 of argv) with title (item 2 of argv) subtitle (item 3 of argv)", "-e", "end run", body, title, subtitle]
+        try? p.run()
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler done: @escaping () -> Void) {
@@ -225,7 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
         done()
     }
 
-    // Show the banner even while Vibecode is frontmost, like the in-app toast does.
+    // Show the banner even while Vibecoder is frontmost, like the in-app toast does.
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent n: UNNotification, withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
         done([.banner])
     }

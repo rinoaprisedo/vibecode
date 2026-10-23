@@ -11,6 +11,8 @@ export function SettingsModal({ accounts, refresh, onClose }: { accounts: Accoun
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [error, setError] = useState("");
   const theme = useTheme();
+  const [autoSwitch, setAutoSwitch] = useState(() => { try { return localStorage.getItem("vibecode.autoSwitch") !== "off"; } catch { return true; } });
+  const toggleAutoSwitch = () => setAutoSwitch((v) => { try { localStorage.setItem("vibecode.autoSwitch", v ? "off" : "on"); } catch {} return !v; });
 
   const run = (fn: () => Promise<unknown>) => fn().then(refresh).catch((e) => setError(e.message));
   const add = () => run(async () => { const a = await api<Account>("/api/accounts", { body: {} }); setSigningIn(a.id); });
@@ -77,7 +79,16 @@ export function SettingsModal({ accounts, refresh, onClose }: { accounts: Accoun
               </div>
             ))}
             <button className="primary add-acc" onClick={add}><Icon name="plus" size={14} /> Add account</button>
+            <label className="auto-switch">
+              <input type="checkbox" checked={autoSwitch} onChange={toggleAutoSwitch} />
+              <span><b>Auto-switch when a limit is hit</b><small className="muted">If an account runs out mid-chat, move to another signed-in account that still has room and continue the work.</small></span>
+            </label>
           </section>
+
+          <footer className="set-about">
+            <b>Vibecoder V1.0.1</b>
+            <span>Developed by <a href="https://rinoaprisedo.com" target="_blank" rel="noreferrer">rinoaprisedo.com</a></span>
+          </footer>
         </div>
       </div>
     </div>

@@ -21,6 +21,7 @@ import { TerminalPanel, type TermRun } from "./components/TerminalPanel";
 import { Icon } from "./components/Icon";
 import { AddFolderMenu } from "./components/AddFolderMenu";
 import { SettingsModal } from "./components/SettingsModal";
+import { WelcomeModal } from "./components/WelcomeModal";
 import type { RemoteState } from "./components/RemotePanel";
 import { ContextMenu, tabMenu } from "./components/ContextMenu";
 import { Resizer } from "./components/Resizer";
@@ -46,6 +47,7 @@ function App() {
   const [status, setStatus] = useState<Record<string, "busy" | "waiting">>({});
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
   const [tunnels, setTunnels] = useState<TunnelInfo[]>([]);
   const [tunnelFor, setTunnelFor] = useState("");
@@ -91,6 +93,7 @@ function App() {
   const loadProjects = useCallback(async () => {
     const list = await api<ProjectInfo[]>("/api/projects");
     setProjects(list);
+    setProjectsLoaded(true);
     // Keep focus on a project that still exists; otherwise fall back to the first one.
     setActiveId((cur) => (list.some((p) => p.id === cur) ? cur : list[0]?.id ?? ""));
     // Drop tabs of folders that were closed.
@@ -239,6 +242,9 @@ function App() {
       {ctx && <ContextMenu x={ctx.x} y={ctx.y} onClose={() => setCtx(null)} items={tabMenu(tabs.map((t) => t.key), ctx.index, closeTabs)} />}
       {tunnelFor && projects.find((p) => p.id === tunnelFor) && <TunnelModal project={projects.find((p) => p.id === tunnelFor)!} tunnels={tunnels} onClose={() => setTunnelFor("")} />}
       {dockerOpen && project && <DockerPanel project={project.id} projectName={project.name} onClose={() => setDockerOpen(false)} onStatus={setDocker} />}
+      {projectsLoaded && projects.length === 0 && !settingsOpen && (
+        <WelcomeModal accounts={accounts} onAdded={setActiveId} onSignIn={() => setSettingsOpen(true)} />
+      )}
       {settingsOpen && <SettingsModal accounts={accounts} refresh={refreshAccounts} onClose={() => setSettingsOpen(false)} />}
     </div>
   );

@@ -1,3 +1,4 @@
+import { openUrl } from "./platform";
 
 import { CLAUDE_BIN as bin } from "./paths";
 const env = (dir: string) => ({ ...process.env, CLAUDE_CONFIG_DIR: dir, BROWSER: "none" });
@@ -36,7 +37,7 @@ export function makeLogin(send: Send) {
           const text = dec.decode(chunk);
           const url = text.match(/https:\/\/\S+/)?.[0];
           if (url && !sentUrl) { sentUrl = true; send({ type: "login-url", account, url });
-            if (process.env.NO_OPEN !== "1") Bun.spawn(["open", url]); }
+            if (process.env.NO_OPEN !== "1") openUrl(url); }
         }
       };
       void read(p.stdout as ReadableStream);

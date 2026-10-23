@@ -1,3 +1,4 @@
+import { isWin, winTrash } from "./platform";
 import { readdir, readFile, writeFile, mkdir, rename, rm, cp, stat } from "node:fs/promises";
 import { resolve, relative, sep, dirname, join, basename, extname } from "node:path";
 
@@ -49,6 +50,7 @@ export async function pasteInto(sources: string[], destDir: string, move: boolea
 // Move to the macOS Trash (recoverable). Uses the same Foundation call Finder does, through JavaScript for Automation,
 // so it needs no Finder/Automation permission prompt. A timeout keeps a stuck call from hanging the request.
 async function moveToTrash(abs: string) {
+  if (isWin) return winTrash(abs);
   const script = 'ObjC.import("Foundation"); function run(a){ const e=Ref(); const ok=$.NSFileManager.defaultManager.trashItemAtURLResultingItemURLError($.NSURL.fileURLWithPath(a[0]), null, e); if(!ok) throw new Error(ObjC.unwrap(e[0].localizedDescription)); }';
   const p = Bun.spawn(["osascript", "-l", "JavaScript", "-e", script, abs], { stdout: "ignore", stderr: "pipe" });
   let timedOut = false;
@@ -118,7 +120,7 @@ export function makeFs(root: string) {
     },
     async remove(p: string, permanent: boolean) {
       const abs = jail(p);
-      if (abs === root) throw new Error("Use Remove from Vibecode to close the project folder");
+      if (abs === root) throw new Error("Use Remove from Vibecoder to close the project folder");
       if (!(await exists(abs))) throw new Error(`"${basename(abs)}" no longer exists`);
       if (permanent) await rm(abs, { recursive: true, force: true });
       else await moveToTrash(abs);
