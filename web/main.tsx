@@ -29,6 +29,7 @@ import { QuickOpen } from "./components/QuickOpen";
 import type { Account } from "./components/AccountMenu";
 import { TunnelModal, type TunnelInfo } from "./components/TunnelModal";
 import { DockerPanel, type DockerStatus } from "./components/DockerPanel";
+import { PostgresPanel } from "./components/PostgresPanel";
 
 type Tab = { key: string; project: string; path: string; content: string; dirty: boolean };
 const tabKey = (project: string, path: string) => `${project}:${path}`;
@@ -53,6 +54,7 @@ function App() {
   const [tunnelFor, setTunnelFor] = useState("");
   useEffect(() => { api<{ tunnels: TunnelInfo[] }>("/api/tunnel/status").then((s) => setTunnels(s.tunnels)).catch(() => {}); }, []);
   const [dockerOpen, setDockerOpen] = useState(false);
+  const [pgFor, setPgFor] = useState("");
   const [docker, setDocker] = useState<DockerStatus | null>(null);
   // The status-bar badge: how many containers run. Checked quietly; the dashboard itself polls faster while open.
   useEffect(() => {
@@ -194,7 +196,7 @@ function App() {
           </span>
         </div>
         {side === "files"
-          ? <FileTree projects={projects} activeId={activeId} versions={versions} status={status} remote={remote} tunnels={tunnels} onTunnel={setTunnelFor}
+          ? <FileTree projects={projects} activeId={activeId} versions={versions} status={status} remote={remote} tunnels={tunnels} onTunnel={setTunnelFor} onPostgres={setPgFor}
               onActivate={setActiveId} onRemove={removeFolder} onOpen={open}
               onChanged={(id) => setVersions((v) => ({ ...v, [id]: (v[id] ?? 0) + 1 }))} onRenamed={renameTabs} onDeleted={deleteTabs} />
           : project && <GitPanel key={project.id} project={project.id} projectName={project.name} version={versions[project.id] ?? 0} onOpen={(p) => open(project.id, p)} />}
@@ -241,6 +243,7 @@ function App() {
       )}
       {ctx && <ContextMenu x={ctx.x} y={ctx.y} onClose={() => setCtx(null)} items={tabMenu(tabs.map((t) => t.key), ctx.index, closeTabs)} />}
       {tunnelFor && projects.find((p) => p.id === tunnelFor) && <TunnelModal project={projects.find((p) => p.id === tunnelFor)!} tunnels={tunnels} onClose={() => setTunnelFor("")} />}
+      {pgFor && projects.find((p) => p.id === pgFor) && <PostgresPanel project={projects.find((p) => p.id === pgFor)!} onClose={() => setPgFor("")} />}
       {dockerOpen && project && <DockerPanel project={project.id} projectName={project.name} onClose={() => setDockerOpen(false)} onStatus={setDocker} />}
       {projectsLoaded && projects.length === 0 && !settingsOpen && (
         <WelcomeModal accounts={accounts} onAdded={setActiveId} onSignIn={() => setSettingsOpen(true)} />

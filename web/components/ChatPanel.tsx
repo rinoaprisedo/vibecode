@@ -311,7 +311,7 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
   useEffect(() => {
     const el = msgsRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => { if (stick.current) toBottom(); });
+    const ro = new ResizeObserver(() => { if (stick.current) { toBottom(); requestAnimationFrame(toBottom); } }); // again after the reflow settles
     ro.observe(el);
     // Content can also grow after the scroll happened (the loading row mounting, an earlier prompt un-pinning and
     // growing, images loading): follow that too while pinned to the bottom, so the newest message is never half hidden.
@@ -478,7 +478,7 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
           const img = (e.target as HTMLElement).closest?.("img.zoomable, .msg-imgs img, .md img") as HTMLImageElement | null;
           if (img?.src && !img.classList.contains("loading")) { e.preventDefault(); setZoom(img.src); }
         }}
-        onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60; }}>
+        onScroll={(e) => { const el = e.currentTarget; if (!el.clientHeight) return; /* hidden (e.g. terminal open): browser resets scrollTop, not a user scroll */ stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60; }}>
         {items.map((it, i) => {
           if (it.kind === "tool") {
             return <ToolItem key={i} name={it.name} input={it.input} />;

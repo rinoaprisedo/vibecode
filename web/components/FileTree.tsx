@@ -90,11 +90,12 @@ function Dir({ project, path, depth, version }: { project: string; path: string;
 
 // One section per open folder (like a multi-root workspace). Clicking a section's header focuses
 // that project: chat, git and new terminals follow it. Right-click files and folders for file operations.
-export function FileTree({ projects, activeId, versions, status, remote, tunnels, onTunnel, onActivate, onRemove, onOpen, onChanged, onRenamed, onDeleted }: {
+export function FileTree({ projects, activeId, versions, status, remote, tunnels, onTunnel, onPostgres, onActivate, onRemove, onOpen, onChanged, onRenamed, onDeleted }: {
   projects: ProjectInfo[]; activeId: string; versions: Record<string, number>;
   status: Record<string, "busy" | "waiting">;
   remote: Record<string, { status: string }>;
   tunnels: { project: string; state: string }[];
+  onPostgres: (id: string) => void;                                       // open the PostgreSQL browser for a project
   onTunnel: (id: string) => void;                                         // open the public-link popup for a project
   onActivate: (id: string) => void; onRemove: (id: string) => void;
   onOpen: (project: string, path: string) => void;
@@ -248,6 +249,9 @@ export function FileTree({ projects, activeId, versions, status, remote, tunnels
               <span className="p-name">{p.name}</span>
               {remote[p.id]?.status === "connected" && <span className="p-remote" title="Remote Control is on: reachable from the Claude app"><Icon name="phone" size={12} /></span>}
               {status[p.id] && <span className={"h-dot " + status[p.id]} title={status[p.id] === "busy" ? "Claude is working here" : "Waiting for approval"} />}
+              <span className="p-play p-db" style={{ cursor: "pointer" }} title="PostgreSQL" onClick={(e) => { e.stopPropagation(); onPostgres(p.id); }}>
+                <Icon name="database" size={12} />
+              </span>
               {(() => {
                 const live = tunnels.filter((t) => t.project === p.id && t.state === "live").length;
                 return (
