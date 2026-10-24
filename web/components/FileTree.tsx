@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api } from "../lib/api";
 import { Icon } from "./Icon";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
@@ -10,6 +11,41 @@ const join = (a: string, b: string) => (a ? `${a}/${b}` : b);
 const dirOf = (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "");
 const baseOf = (p: string) => p.slice(p.lastIndexOf("/") + 1);
 
+type TokenStat = { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; turns: number; since: number };
+const fmtTok = (n: number) => (n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "K" : String(n));
+const tokTotal = (s: TokenStat) => s.input + s.output + s.cacheWrite; // cache reads are re-used context, so they are not counted here
+// Token count next to a project name; hovering opens a small card with the breakdown (a custom popover, not the browser tooltip).
+function TokenBadge({ s }: { s: TokenStat }) {
+  const [at, setAt] = useState<{ x: number; y: number; up: boolean } | null>(null);
+  const total = tokTotal(s);
+  const parts = [
+    { key: "Input", n: s.input, color: "var(--info)" },
+    { key: "Output", n: s.output, color: "var(--accent)" },
+    { key: "Cache write", n: s.cacheWrite, color: "var(--warn)" },
+  ];
+  const show = (e: React.MouseEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const up = r.bottom + 230 > window.innerHeight; // not enough room below: open upwards
+    setAt({ x: Math.max(8, Math.min(r.left, window.innerWidth - 276)), y: up ? r.top - 8 : r.bottom + 8, up });
+  };
+  return (
+    <span className="p-tok" onMouseEnter={show} onMouseLeave={() => setAt(null)}>
+      {fmtTok(total)}
+      {at && createPortal(
+        <div className="tok-card" style={{ left: at.x, top: at.y, transform: at.up ? "translateY(-100%)" : undefined }}>
+          <div className="tok-head"><b>{fmtTok(total)}</b><span>tokens used in this project</span></div>
+          <div className="tok-bar">{parts.map((p) => p.n > 0 && <i key={p.key} style={{ width: `${(p.n / total) * 100}%`, background: p.color }} />)}</div>
+          {parts.map((p) => (
+            <div key={p.key} className="tok-row"><i style={{ background: p.color }} /><span>{p.key}</span><b>{p.n.toLocaleString()}</b><em>{total ? Math.round((p.n / total) * 100) : 0}%</em></div>
+          ))}
+          <div className="tok-sep" />
+          <div className="tok-row dim"><span>Cache read</span><b>{fmtTok(s.cacheRead)}</b><em>not counted</em></div>
+          <div className="tok-row dim"><span>Estimated cost</span><b>${s.cost.toFixed(2)}</b></div>
+          <div className="tok-foot">{s.turns} turn{s.turns === 1 ? "" : "s"} since {new Date(s.since).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })} · right-click the folder to reset</div>
+        </div>, document.body)}
+    </span>
+  );
+}
 type Target = { project: string; path: string; dir: boolean };               // path "" = the project folder itself
 type Clip = { mode: "copy" | "cut"; items: { project: string; path: string }[] };
 type Edit = { kind: "rename" | "file" | "folder"; project: string; path: string }; // rename: the item; file/folder: the parent dir
@@ -90,12 +126,11 @@ function Dir({ project, path, depth, version }: { project: string; path: string;
 
 // One section per open folder (like a multi-root workspace). Clicking a section's header focuses
 // that project: chat, git and new terminals follow it. Right-click files and folders for file operations.
-export function FileTree({ projects, activeId, versions, status, remote, tunnels, onTunnel, onPostgres, onActivate, onRemove, onOpen, onChanged, onRenamed, onDeleted }: {
+export function FileTree({ projects, activeId, versions, status, remote, tunnels, onTunnel, onActivate, onRemove, onOpen, onChanged, onRenamed, onDeleted }: {
   projects: ProjectInfo[]; activeId: string; versions: Record<string, number>;
   status: Record<string, "busy" | "waiting">;
   remote: Record<string, { status: string }>;
   tunnels: { project: string; state: string }[];
-  onPostgres: (id: string) => void;                                       // open the PostgreSQL browser for a project
   onTunnel: (id: string) => void;                                         // open the public-link popup for a project
   onActivate: (id: string) => void; onRemove: (id: string) => void;
   onOpen: (project: string, path: string) => void;
@@ -196,7 +231,7 @@ export function FileTree({ projects, activeId, versions, status, remote, tunnels
       "sep",
       { label: "Rename…", onClick: () => setEditing({ kind: "rename", project: t.project, path: t.path }), disabled: root },
       { label: "Delete", onClick: () => setDel({ t, permanent: false }), disabled: root },
-      ...(root ? ["sep" as const, { label: "Remove from Vibecoder", onClick: () => onRemove(t.project) }] : []),
+      ...(root ? ["sep" as const, { label: "Reset token counter", onClick: () => api<Record<string, TokenStat>>("/api/tokens/reset", { body: { project: t.project } }).then(setTok).catch(() => {}), disabled: !tok[t.project] }, { label: "Remove from Vibecoder", onClick: () => onRemove(t.project) }] : []),
     ];
   };
 
@@ -215,6 +250,10 @@ export function FileTree({ projects, activeId, versions, status, remote, tunnels
   // Untracked and gitignored paths per project (git reports untracked folders as "dir/"); the tree greys them out.
   const [grey, setGrey] = useState<Record<string, string[]>>({});
   // Per project: files changed since the last commit, and commits not pushed yet. Shown as a marker on the folder row.
+  // Tokens used per project (input + output + cache writes), summed on the server from every finished turn.
+  const [tok, setTok] = useState<Record<string, TokenStat>>({});
+  const loadTok = () => api<Record<string, TokenStat>>("/api/tokens").then(setTok).catch(() => {});
+  useEffect(() => { loadTok(); }, [JSON.stringify(status)]); // a turn finishing flips the project's status
   const [unpushed, setUnpushed] = useState<Record<string, { files: number; ahead: number }>>({});
   const stamp = projects.map((p) => `${p.id}:${versions[p.id] ?? 0}:${bump[p.id] ?? 0}`).join(",");
   const refreshGit = () =>
@@ -225,12 +264,13 @@ export function FileTree({ projects, activeId, versions, status, remote, tunnels
           setGrey((g) => ({ ...g, [p.id]: [...st.files.filter((f) => f.x === "?").map((f) => f.path), ...(st.ignored ?? [])] }));
         })
         .catch(() => { setGrey((g) => ({ ...g, [p.id]: [] })); setUnpushed((u) => ({ ...u, [p.id]: { files: 0, ahead: 0 } })); }));
-  useEffect(() => { refreshGit(); }, [stamp]);
+  useEffect(() => { refreshGit(); loadTok(); }, [stamp]);
   // A commit or push done in the terminal changes no watched file, so also re-check periodically and when the window regains focus.
   useEffect(() => {
-    const t = setInterval(refreshGit, 15000);
-    window.addEventListener("focus", refreshGit);
-    return () => { clearInterval(t); window.removeEventListener("focus", refreshGit); };
+    const tick = () => { refreshGit(); loadTok(); };
+    const t = setInterval(tick, 15000);
+    window.addEventListener("focus", tick);
+    return () => { clearInterval(t); window.removeEventListener("focus", tick); };
   }, [stamp]);
 
   const ctx: TreeCtx = {
@@ -258,6 +298,7 @@ export function FileTree({ projects, activeId, versions, status, remote, tunnels
                 <Icon name={expanded[p.id] ? "chevronDown" : "chevronRight"} size={14} className="chev" />
               </span>
               <span className="p-name">{p.name}</span>
+              {tok[p.id] && tokTotal(tok[p.id]) > 0 && <TokenBadge s={tok[p.id]} />}
               {(() => {
                 const u = unpushed[p.id];
                 if (!u || (!u.files && !u.ahead)) return null;
@@ -270,9 +311,6 @@ export function FileTree({ projects, activeId, versions, status, remote, tunnels
               })()}
               {remote[p.id]?.status === "connected" && <span className="p-remote" title="Remote Control is on: reachable from the Claude app"><Icon name="phone" size={12} /></span>}
               {status[p.id] && <span className={"h-dot " + status[p.id]} title={status[p.id] === "busy" ? "Claude is working here" : "Waiting for approval"} />}
-              <span className="p-play p-db" style={{ cursor: "pointer" }} title="PostgreSQL" onClick={(e) => { e.stopPropagation(); onPostgres(p.id); }}>
-                <Icon name="database" size={12} />
-              </span>
               {(() => {
                 const live = tunnels.filter((t) => t.project === p.id && t.state === "live").length;
                 return (

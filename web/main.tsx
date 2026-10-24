@@ -29,9 +29,10 @@ import { QuickOpen } from "./components/QuickOpen";
 import type { Account } from "./components/AccountMenu";
 import { TunnelModal, type TunnelInfo } from "./components/TunnelModal";
 import { DockerPanel, type DockerStatus } from "./components/DockerPanel";
-import { PostgresPanel } from "./components/PostgresPanel";
+import { DatabasePanel } from "./components/DatabasePanel";
+import { UsagePanel } from "./components/UsagePanel";
 
-type Tab = { key: string; project: string; path: string; content: string; dirty: boolean; kind?: "pg" | "term"; title?: string; command?: string }; // kind "pg" / "term": PostgreSQL browser or a terminal, shown as a tab in the editor column instead of a file
+type Tab = { key: string; project: string; path: string; content: string; dirty: boolean; kind?: "db" | "term" | "docker" | "usage"; title?: string; command?: string; preset?: { container: string; n: number } }; // kind "pg" / "term": database browser, Docker dashboard or a terminal, shown as a tab in the editor column instead of a file
 const tabKey = (project: string, path: string) => `${project}:${path}`;
 
 function App() {
@@ -49,17 +50,17 @@ function App() {
   const [tunnels, setTunnels] = useState<TunnelInfo[]>([]);
   const [tunnelFor, setTunnelFor] = useState("");
   useEffect(() => { api<{ tunnels: TunnelInfo[] }>("/api/tunnel/status").then((s) => setTunnels(s.tunnels)).catch(() => {}); }, []);
-  const [dockerOpen, setDockerOpen] = useState(false);
+  const dockerActive = tabs.find((t) => t.key === active)?.kind === "docker"; // the Docker tab does its own faster polling while in front
   const [docker, setDocker] = useState<DockerStatus | null>(null);
   // The status-bar badge: how many containers run. Checked quietly; the dashboard itself polls faster while open.
   useEffect(() => {
-    if (dockerOpen) return;
+    if (dockerActive) return;
     let alive = true;
     const load = () => { if (!document.hidden) api<DockerStatus>("/api/docker/status").then((s) => alive && setDocker(s)).catch(() => {}); };
     load();
     const t = setInterval(load, 20_000);
     return () => { alive = false; clearInterval(t); };
-  }, [dockerOpen]);
+  }, [dockerActive]);
   const [ctx, setCtx] = useState<{ x: number; y: number; index: number } | null>(null);
   // Column widths (draggable); the file column takes whatever is left.
   const [w, setW] = useState<{ side: number; term: number; chat: number }>(() => {
@@ -137,9 +138,11 @@ function App() {
     setActiveId(projectId); // opening a file focuses its project
   }, []);
 
-  const openPostgres = (projectId: string) => {
-    const key = `pg:${projectId}`;
-    setTabs((t) => (t.some((x) => x.key === key) ? t : [...t, { key, project: projectId, path: "", content: "", dirty: false, kind: "pg" }]));
+  // `container`: a database container to connect to (from the Docker panel); without it the tab just opens on the connection list.
+  const openDatabase = (projectId: string, container?: string) => {
+    const key = `db:${projectId}`;
+    const preset = container ? { container, n: Date.now() } : undefined;
+    setTabs((t) => (t.some((x) => x.key === key) ? (preset ? t.map((x) => (x.key === key ? { ...x, preset } : x)) : t) : [...t, { key, project: projectId, path: "", content: "", dirty: false, kind: "db", preset }]));
     setActive(key);
     setActiveId(projectId);
   };
@@ -164,6 +167,17 @@ function App() {
     if (mine) setActive(mine.key); else newTerminal();
   };
   const toggleTerminalRef = useRef(toggleTerminal); toggleTerminalRef.current = toggleTerminal;
+  const openDocker = (projectId: string) => {
+    const key = `docker:${projectId}`;
+    setTabs((t) => (t.some((x) => x.key === key) ? t : [...t, { key, project: projectId, path: "", content: "", dirty: false, kind: "docker" }]));
+    setActive(key);
+    setActiveId(projectId);
+  };
+  // Token usage across all projects: one tab for the whole app.
+  const openUsage = () => {
+    setTabs((t) => (t.some((x) => x.key === "usage") ? t : [...t, { key: "usage", project: activeIdRef.current, path: "", content: "", dirty: false, kind: "usage" }]));
+    setActive("usage");
+  };
   const tab = tabs.find((t) => t.key === active);
   const save = () => tab && !tab.kind && api("/api/file?path=" + encodeURIComponent(tab.path), { method: "PUT", body: { content: tab.content }, project: tab.project })
     .then(() => setTabs((ts) => ts.map((t) => (t.key === tab.key ? { ...t, dirty: false } : t))));
@@ -220,16 +234,18 @@ function App() {
           </span>
         </div>
         {side === "files"
-          ? <FileTree projects={projects} activeId={activeId} versions={versions} status={status} remote={remote} tunnels={tunnels} onTunnel={setTunnelFor} onPostgres={openPostgres}
+          ? <FileTree projects={projects} activeId={activeId} versions={versions} status={status} remote={remote} tunnels={tunnels} onTunnel={setTunnelFor}
               onActivate={setActiveId} onRemove={removeFolder} onOpen={open}
               onChanged={(id) => setVersions((v) => ({ ...v, [id]: (v[id] ?? 0) + 1 }))} onRenamed={renameTabs} onDeleted={deleteTabs} />
           : project && <GitPanel key={project.id} project={project.id} projectName={project.name} version={versions[project.id] ?? 0} onOpen={(p) => open(project.id, p)} />}
         <div className="statusbar">
-          <button className={tab?.kind === "term" ? "on" : ""} onClick={toggleTerminal} title="Ctrl+`"><Icon name="terminal" size={14} /> Terminal</button>
-          <button onClick={() => setDockerOpen(true)} title="Docker">
-            <Icon name="docker" size={14} /> Docker
+          <button className={tab?.kind === "term" ? "on" : ""} onClick={toggleTerminal} title="Terminal (Ctrl+`)" aria-label="Terminal"><Icon name="terminal" size={15} /></button>
+          <button className={dockerActive ? "on" : ""} disabled={!project} onClick={() => project && openDocker(project.id)} title="Docker" aria-label="Docker">
+            <Icon name="docker" size={15} />
             {docker?.state === "running" && <span className={"dk-badge" + (docker.running ? "" : " off")}>{docker.running}</span>}
           </button>
+          <button className={tab?.kind === "db" ? "on" : ""} disabled={!project} onClick={() => project && openDatabase(project.id)} title="Databases: PostgreSQL, MySQL, Redis" aria-label="Database"><Icon name="database" size={15} /></button>
+          <button className={tab?.kind === "usage" ? "on" : ""} onClick={openUsage} title="Token usage" aria-label="Token usage"><Icon name="chart" size={15} /></button>
         </div>
       </aside>
       <Resizer onStart={() => (base.current = eff.side)} onDrag={grow("side", 1, 200)} />
@@ -237,23 +253,30 @@ function App() {
         <main className="main">
           <div className="tabs">
             {tabs.map((t, i) => (
-              <div key={t.key} className={"tab" + (t.key === active ? " on" : "")} title={t.kind === "pg" ? `PostgreSQL · ${nameOf[t.project] ?? ""}` : t.kind === "term" ? `Terminal in ${nameOf[t.project] ?? ""}` : `${nameOf[t.project] ?? ""}/${t.path}`}
+              <div key={t.key} className={"tab" + (t.key === active ? " on" : "")} title={t.kind === "db" ? `Database · ${nameOf[t.project] ?? ""}` : t.kind === "docker" ? `Docker` : t.kind === "usage" ? "Token usage"  : t.kind === "term" ? `Terminal in ${nameOf[t.project] ?? ""}` : `${nameOf[t.project] ?? ""}/${t.path}`}
                 onClick={() => { setActive(t.key); setActiveId(t.project); }}
                 onContextMenu={(e) => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY, index: i }); }}>
-                {t.kind === "pg" ? <><Icon name="database" size={13} /> PostgreSQL</> : t.kind === "term" ? <><Icon name="terminal" size={13} /> {t.title}</> : t.path.split("/").pop()}{t.dirty ? " ●" : ""}
+                {t.kind === "db" ? <><Icon name="database" size={13} /> Database</> : t.kind === "usage" ? <><Icon name="chart" size={13} /> Usage</> : t.kind === "docker" ? <><Icon name="docker" size={13} /> Docker</> : t.kind === "term" ? <><Icon name="terminal" size={13} /> {t.title}</> : t.path.split("/").pop()}{t.dirty ? " ●" : ""}
                 {projects.length > 1 && <span className="tab-proj" style={projectTint(projects, t.project)}>{nameOf[t.project]}</span>}
                 <span className="x" onClick={(e) => { e.stopPropagation(); close(t.key); }}><Icon name="x" size={13} /></span>
               </div>
             ))}
             <button className="g-icon tab-new" style={{ visibility: "visible" }} title="New terminal" onClick={() => newTerminal()}><Icon name="plus" size={14} /></button>
           </div>
-          {/* PostgreSQL tabs stay mounted (hidden) while another tab is active, so open connections and queries survive */}
-          {tabs.filter((t) => t.kind === "pg" && projects.some((p) => p.id === t.project)).map((t) => (
+          {/* Database and Docker tabs stay mounted (hidden) while another tab is active, so open connections and queries survive */}
+          {tabs.filter((t) => t.kind === "db" && projects.some((p) => p.id === t.project)).map((t) => (
             <div key={t.key} className="pg-embed" hidden={t.key !== active}>
-              <PostgresPanel embedded project={projects.find((p) => p.id === t.project)!} onClose={() => close(t.key)} />
+              <DatabasePanel embedded preset={t.preset} project={projects.find((p) => p.id === t.project)!} onClose={() => close(t.key)} />
             </div>
           ))}
           {/* terminals stay mounted too: their shells keep running behind other tabs */}
+          {tabs.some((t) => t.kind === "usage") && <div className="pg-embed" hidden={active !== "usage"}><UsagePanel projects={projects} active={active === "usage"} /></div>}
+          {tabs.filter((t) => t.kind === "docker" && projects.some((p) => p.id === t.project)).map((t) => (
+            <div key={t.key} className="pg-embed" hidden={t.key !== active}>
+              <DockerPanel embedded active={t.key === active} project={t.project} projectName={nameOf[t.project] ?? ""} onClose={() => close(t.key)} onStatus={setDocker}
+                onOpenDatabase={(c) => openDatabase(t.project, c)} />
+            </div>
+          ))}
           <div className="term-body term-embed" style={{ display: tab.kind === "term" ? "block" : "none" }}>
             {tabs.filter((t) => t.kind === "term").map((t) => (
               <TerminalView key={t.key} id={t.key.slice(5)} project={t.project} active={t.key === active} command={t.command} onExit={() => close(t.key)} />
@@ -278,7 +301,6 @@ function App() {
       )}
       {ctx && <ContextMenu x={ctx.x} y={ctx.y} onClose={() => setCtx(null)} items={tabMenu(tabs.map((t) => t.key), ctx.index, closeTabs)} />}
       {tunnelFor && projects.find((p) => p.id === tunnelFor) && <TunnelModal project={projects.find((p) => p.id === tunnelFor)!} tunnels={tunnels} onClose={() => setTunnelFor("")} />}
-      {dockerOpen && project && <DockerPanel project={project.id} projectName={project.name} onClose={() => setDockerOpen(false)} onStatus={setDocker} />}
       {projectsLoaded && projects.length === 0 && !settingsOpen && (
         <WelcomeModal accounts={accounts} onAdded={setActiveId} onSignIn={() => setSettingsOpen(true)} />
       )}

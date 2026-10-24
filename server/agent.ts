@@ -6,6 +6,7 @@ import { CLAUDE_BIN } from "./paths";
 import { images as imageStore } from "./images";
 import { authStatus } from "./auth";
 import { getUsage } from "./usage";
+import { tokens } from "./tokens";
 
 
 type Send = (msg: unknown) => void;
@@ -161,6 +162,7 @@ export function makeAgent(send: Send) {
           }
           if (m.type === "assistant") { doneTok += (m as any).message?.usage?.output_tokens ?? curTok; curTok = 0; sendTok(true); }
           if (m.type === "assistant" && !m.parent_tool_use_id) { lastUsage = m.message.usage; lastModel = m.message.model; }
+          if (m.type === "result") void tokens.add(root, (m as any).usage, (m as any).total_cost_usd, (m as any).modelUsage).catch(() => {}); // per-project totals
           if (m.type === "result" && lastUsage) {
             // Context in use = what the last main-loop call read plus what it wrote.
             const used = (lastUsage.input_tokens ?? 0) + (lastUsage.cache_read_input_tokens ?? 0)

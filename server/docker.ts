@@ -294,26 +294,50 @@ export function makeDockerLogs(send: (m: unknown) => void) {
   };
 }
 
-// Running PostgreSQL containers, with the credentials from their environment and the port published on this machine.
+// Running database containers (PostgreSQL, MySQL/MariaDB, Redis), with the credentials from their environment and the port published on this machine.
 // Containers whose compose folder lies inside the project come first, so a click on "database" lands on the project's own DB.
-export type PgGuess = { container: string; image: string; host: string; port: number; database: string; user: string; password: string; inProject: boolean };
-export async function detectPostgres(root: string): Promise<PgGuess[]> {
+export type DbGuess = { kind: "postgres" | "mysql" | "redis"; container: string; image: string; host: string; port: number; database: string; user: string; password: string; inProject: boolean };
+const IMAGE_KIND: [DbGuess["kind"], RegExp, number][] = [
+  ["postgres", /postgres|postgis|timescale|pgvector/i, 5432],
+  ["mysql", /mysql|mariadb|percona/i, 3306],
+  ["redis", /redis|valkey|keydb/i, 6379],
+];
+export const dbKindOfImage = (image: string) => IMAGE_KIND.find(([, re]) => re.test(image))?.[0];
+export async function detectDatabases(root: string): Promise<DbGuess[]> {
   if (!dockerBin()) return [];
   const ps = rows(await must(["ps", "--no-trunc", "--format", "{{json .}}"]).catch(() => ""));
-  const ids = ps.filter((c) => /postgres|postgis|timescale|pgvector|supabase\/postgres/i.test(String(c.Image)) || /(?:^|[ ,>:])5432\/tcp/.test(String(c.Ports))).map((c) => String(c.ID));
+  const ids = ps.filter((c) => dbKindOfImage(String(c.Image))).map((c) => String(c.ID));
   if (!ids.length) return [];
   const info: any[] = JSON.parse((await must(["inspect", ...ids]).catch(() => "[]")) || "[]");
   const norm = (d: string) => d.replace(/\/+$/, "");
-  const out: PgGuess[] = [];
+  const out: DbGuess[] = [];
   for (const c of info) {
+    const image = String(c.Config?.Image ?? "");
+    const hit = IMAGE_KIND.find(([, re]) => re.test(image));
+    if (!hit) continue;
+    const [kind, , inner] = hit;
     const env: Record<string, string> = Object.fromEntries((c.Config?.Env ?? []).map((e: string) => { const i = e.indexOf("="); return [e.slice(0, i), e.slice(i + 1)]; }));
-    const bound = c.NetworkSettings?.Ports?.["5432/tcp"]?.[0]?.HostPort;
+    const bound = c.NetworkSettings?.Ports?.[`${inner}/tcp`]?.[0]?.HostPort;
     if (!bound) continue; // not reachable from this machine
-    const user = env.POSTGRES_USER || env.POSTGRESQL_USERNAME || "postgres";
     const dir = norm(c.Config?.Labels?.["com.docker.compose.project.working_dir"] ?? "");
+    let user = "", password = "", database = "";
+    if (kind === "postgres") {
+      user = env.POSTGRES_USER || env.POSTGRESQL_USERNAME || "postgres";
+      password = env.POSTGRES_PASSWORD || env.POSTGRESQL_PASSWORD || "";
+      database = env.POSTGRES_DB || env.POSTGRESQL_DATABASE || user;
+    } else if (kind === "mysql") {
+      const app = env.MYSQL_USER || env.MARIADB_USER;
+      user = app || "root";
+      password = app ? env.MYSQL_PASSWORD || env.MARIADB_PASSWORD || "" : env.MYSQL_ROOT_PASSWORD || env.MARIADB_ROOT_PASSWORD || "";
+      database = env.MYSQL_DATABASE || env.MARIADB_DATABASE || "";
+    } else {
+      // the password usually comes from the start command (--requirepass x) or a bitnami-style variable
+      const cmd = [...(c.Config?.Entrypoint ?? []), ...(c.Config?.Cmd ?? [])].join(" ");
+      password = env.REDIS_PASSWORD || /--requirepass\s+("[^"]*"|'[^']*'|\S+)/.exec(cmd)?.[1]?.replace(/^["']|["']$/g, "") || "";
+      database = "0";
+    }
     out.push({
-      container: String(c.Name ?? "").replace(/^\//, ""), image: String(c.Config?.Image ?? ""), host: "localhost", port: Number(bound),
-      database: env.POSTGRES_DB || env.POSTGRESQL_DATABASE || user, user, password: env.POSTGRES_PASSWORD || env.POSTGRESQL_PASSWORD || "",
+      kind, container: String(c.Name ?? "").replace(/^\//, ""), image, host: "localhost", port: Number(bound), database, user, password,
       inProject: !!dir && (dir === norm(root) || dir.startsWith(norm(root) + "/")),
     });
   }

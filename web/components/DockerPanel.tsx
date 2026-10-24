@@ -58,8 +58,9 @@ function Confirm({ label, armed, onConfirm, icon, title, disabled }: { label: st
   );
 }
 
-export function DockerPanel({ project, projectName, onClose, onStatus }: {
-  project: string; projectName: string; onClose: () => void; onStatus: (s: DockerStatus) => void;
+// `embedded`: shown as a tab in the editor column instead of a popup; `active` tells whether that tab is in front (polling pauses while it is not).
+export function DockerPanel({ project, projectName, onClose, onStatus, onOpenDatabase, embedded, active = true }: {
+  project: string; projectName: string; onClose: () => void; onStatus: (s: DockerStatus) => void; onOpenDatabase: (container: string) => void; embedded?: boolean; active?: boolean;
 }) {
   const call = <T = any,>(path: string, body?: unknown) => api<T>(`/api/docker/${path}`, { body, project });
   const [status, setStatus] = useState<DockerStatus | null>(null);
@@ -98,10 +99,10 @@ export function DockerPanel({ project, projectName, onClose, onStatus }: {
   }, [project]);
   const loadDf = useCallback(() => { call<Df>("df").then(setDf).catch(() => {}); }, [project]);
 
-  usePoll(loadStatus, 4000, true);
-  usePoll(loadOverview, 3000, running);
-  usePoll(loadStats, 4000, running);
-  usePoll(loadDf, 30000, running);
+  usePoll(loadStatus, 4000, active);
+  usePoll(loadOverview, 3000, !!running && active);
+  usePoll(loadStats, 4000, !!running && active);
+  usePoll(loadDf, 30000, !!running && active);
   useEffect(() => { if (!running) { setOv(null); setStats({}); setHist({ cpu: [], mem: [] }); } }, [running]);
 
   const refresh = () => { loadStatus(); loadOverview(); loadStats(); loadDf(); };
@@ -157,7 +158,7 @@ export function DockerPanel({ project, projectName, onClose, onStatus }: {
       <span style={{ flex: 1 }} />
       {running && <div className="dk-search top"><Icon name="search" size={13} /><input placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} /></div>}
       <button className="g-icon" style={{ visibility: "visible" }} title="Refresh" onClick={refresh}><Icon name="rotate" size={15} /></button>
-      <button className="g-icon" style={{ visibility: "visible" }} title="Close" onClick={onClose}><Icon name="x" size={16} /></button>
+      {!embedded && <button className="g-icon" style={{ visibility: "visible" }} title="Close" onClick={onClose}><Icon name="x" size={16} /></button>}
     </div>
   );
 
@@ -263,7 +264,7 @@ export function DockerPanel({ project, projectName, onClose, onStatus }: {
                       </div>
                       {!off && g.items.map((c) => (
                         <ContainerRow key={c.id} c={c} stat={stats[c.id]} selected={c.id === selected} busy={busy.has(c.id)}
-                          onSelect={() => setSelected(c.id === selected ? "" : c.id)} onAction={(a) => container(c, a)} />
+                          onSelect={() => setSelected(c.id === selected ? "" : c.id)} onAction={(a) => container(c, a)} onDb={() => onOpenDatabase(c.name)} />
                       ))}
                     </div>
                   );
@@ -355,8 +356,8 @@ export function DockerPanel({ project, projectName, onClose, onStatus }: {
   }
 
   return (
-    <div className="modal-backdrop dk-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={"dk-panel" + (unavailable ? " small" : "")}>
+    <div className={embedded ? "pg-embed-root" : "modal-backdrop dk-backdrop"} onMouseDown={embedded ? undefined : (e) => e.target === e.currentTarget && onClose()}>
+      <div className={embedded ? "pg-embed-panel dk-embedded" : "dk-panel" + (unavailable ? " small" : "")}>
         {header}
         {body}
         {toast && <div className={"dk-toast" + (toast.bad ? " bad" : "")} onClick={() => setToast(null)}>{toast.text}</div>}
@@ -365,8 +366,11 @@ export function DockerPanel({ project, projectName, onClose, onStatus }: {
   );
 }
 
-function ContainerRow({ c, stat, selected, busy, onSelect, onAction }: {
-  c: Container; stat?: Stat; selected: boolean; busy: boolean; onSelect: () => void; onAction: (a: string) => void;
+// Images the database browser can talk to: PostgreSQL, MySQL / MariaDB and Redis (and their common variants).
+const isDbImage = (image: string) => /postgres|postgis|timescale|pgvector|mysql|mariadb|percona|redis|valkey|keydb/i.test(image);
+
+function ContainerRow({ c, stat, selected, busy, onSelect, onAction, onDb }: {
+  c: Container; stat?: Stat; selected: boolean; busy: boolean; onSelect: () => void; onAction: (a: string) => void; onDb: () => void;
 }) {
   const on = c.state === "running";
   const tone = stateTone(c);
@@ -399,6 +403,7 @@ function ContainerRow({ c, stat, selected, busy, onSelect, onAction }: {
         </> : null}
       </div>
       <div className="dk-cactions" onClick={(e) => e.stopPropagation()}>
+        {on && isDbImage(c.image) && <button className="g-icon" style={{ visibility: "visible" }} title="Open in the database browser" onClick={onDb}><Icon name="database" size={14} /></button>}
         {busy ? <span className="dk-spin" /> : on
           ? <>
               <button className="g-icon" style={{ visibility: "visible" }} title="Restart" onClick={() => onAction("restart")}><Icon name="rotate" size={14} /></button>

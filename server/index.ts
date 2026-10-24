@@ -13,8 +13,9 @@ import { images } from "./images";
 import { templates } from "./templates";
 import { makeTunnels } from "./tunnel";
 import { saveCredential, sshKey, makeSshKey } from "./git";
-import { dockerApi, makeDockerLogs, detectPostgres } from "./docker";
-import { pgApi } from "./postgres";
+import { dockerApi, makeDockerLogs, detectDatabases } from "./docker";
+import { dbApi } from "./db";
+import { tokens } from "./tokens";
 import { WEB_DIR, DATA_DIR, PACKAGED } from "./paths";
 import { BOILERPLATES, checkTarget, defaultParent, makeBoilerplate } from "./boilerplate";
 import { pasteInto } from "./fs";
@@ -109,6 +110,8 @@ const start = (port: number) => Bun.serve<Data>({
         if (!(await file.exists())) return json({ error: "not found" }, 404);
         return new Response(file, { headers: { "content-type": ext === "svg" ? "image/svg+xml" : ext === "jpg" ? "image/jpeg" : `image/${ext}`, "cache-control": "private, max-age=60" } });
       }
+      if (p === "/api/tokens" && req.method === "GET") return json(await tokens.all());
+      if (p === "/api/tokens/reset" && req.method === "POST") return json(await tokens.reset(String((await req.json().catch(() => ({}))).project ?? "")));
       if (p === "/api/remote" && req.method === "GET") return json(remote.list());
       if (p === "/api/remote/start" && req.method === "POST") {
         const proj = projects.get(req.headers.get("x-project"));
@@ -213,8 +216,8 @@ const start = (port: number) => Bun.serve<Data>({
       }
       if (p === "/api/templates" && req.method === "GET") return json(await templates.load());
       if (p === "/api/templates" && req.method === "PUT") return json(await templates.save(await req.json()));
-      if (p === "/api/pg/detect") return json(await detectPostgres((() => { try { return projects.get(req.headers.get("x-project") ?? q.get("project")).root; } catch { return anyRoot(); } })()));
-      if (p.startsWith("/api/pg/")) return json(await pgApi(p.slice("/api/pg/".length), req.method, await req.json().catch(() => ({}))));
+      if (p === "/api/db/detect") return json(await detectDatabases((() => { try { return projects.get(req.headers.get("x-project") ?? q.get("project")).root; } catch { return anyRoot(); } })()));
+      if (p.startsWith("/api/db/")) return json(await dbApi(p.slice("/api/db/".length), req.method, await req.json().catch(() => ({}))));
       if (p.startsWith("/api/docker/")) {
         const root = (() => { try { return projects.get(req.headers.get("x-project") ?? q.get("project")).root; } catch { return anyRoot(); } })();
         return json(await dockerApi(p.slice("/api/docker/".length), req.method, q, () => req.json().catch(() => ({})), root));
