@@ -76,7 +76,6 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
   const [dragging, setDragging] = useState(false);
   const [tabCtx, setTabCtx] = useState<{ x: number; y: number; index: number } | null>(null);
   const [listKey, setListKey] = useState(0);
-  const [toasts, setToasts] = useState<{ id: string; chatId: string; project: string; title: string; body: string; warn?: boolean }[]>([]);
   const [usageKey, setUsageKey] = useState(0); // bumps after each finished reply to refresh usage
   const [sound, setSound] = useState(() => { try { return localStorage.getItem("vibecode.sound") !== "off"; } catch { return true; } });
   const toggleSound = () => setSound((v) => {
@@ -252,10 +251,7 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
       else if (m.type === "permission") {
         push(m.chatId, { kind: "permission", id: m.id, tool: m.tool, input: m.input });
         if (soundRef.current) {
-          const tid = crypto.randomUUID();
           const what = m.tool === "ExitPlanMode" ? "Plan ready for review" : m.tool === "AskUserQuestion" ? String(m.input?.questions?.[0]?.question ?? "Claude has a question") : String(m.input?.command ?? m.input?.file_path ?? m.tool);
-          setToasts((t) => [...t.slice(-2), { id: tid, chatId: m.chatId, project: storeRef.current[m.chatId]?.project ?? "", title: "Needs your approval", body: `${m.tool}: ${what}`.slice(0, 140), warn: true }]);
-          setTimeout(() => setToasts((t) => t.filter((x) => x.id !== tid)), 9000);
           nativeBanner("Needs your approval", `${m.tool}: ${what}`.slice(0, 140), m.chatId, storeRef.current[m.chatId]?.project ?? "");
         }
       }
@@ -274,9 +270,6 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
         setStopping((x) => { if (!x[m.chatId]) return x; const n = { ...x }; delete n[m.chatId]; return n; });
         setTimeout(() => setUsageKey((k) => k + 1), 1500);
         if (m.notify) {
-          const id = crypto.randomUUID();
-          setToasts((t) => [...t.slice(-2), { id, chatId: m.chatId, project: storeRef.current[m.chatId]?.project ?? "", ...m.notify }]);
-          setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 7000);
           nativeBanner(m.notify.title, m.notify.body, m.chatId, storeRef.current[m.chatId]?.project ?? "");
         }
       }
@@ -304,7 +297,13 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
     if (!el) return;
     const ro = new ResizeObserver(() => { if (stick.current) toBottom(); });
     ro.observe(el);
-    return () => ro.disconnect();
+    // Content can also grow after the scroll happened (the loading row mounting, an earlier prompt un-pinning and
+    // growing, images loading): follow that too while pinned to the bottom, so the newest message is never half hidden.
+    const follow = () => { if (stick.current) requestAnimationFrame(toBottom); };
+    const mo = new MutationObserver(follow);
+    mo.observe(el, { childList: true, subtree: true, characterData: true });
+    el.addEventListener("load", follow, true);
+    return () => { ro.disconnect(); mo.disconnect(); el.removeEventListener("load", follow, true); };
   }, [chatId, projects.length, accountId]);
 
   // A closed folder takes its tabs (and running sessions) with it.
@@ -360,6 +359,7 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
     stick.current = true;
     patch(id, (x) => ({ ...x, busy: true, project, account: x.account ?? accountId }));
     push(id, { kind: "user", text, ...(ids.length ? { images: ids } : {}) });
+    setTimeout(() => { if (stick.current) toBottom(); }, 150); // once the new prompt and the loading row have laid out
     conn.current?.send({ type: "prompt", chatId: id, project, text, images: ids, opts: { ...settings, resume: c?.claudeSession, sound, autoSwitch: autoSwitchOn(), account: c?.account ?? accountId } });
   };
   dispatchRef.current = dispatch;
@@ -423,14 +423,6 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
           <button className="lb-x" title="Close (Esc)" onClick={() => setZoom(null)}><Icon name="x" size={18} /></button>
         </div>
       )}
-      <div className="toasts">
-        {toasts.map((t) => (
-          <div key={t.id} className="toast" onClick={() => { setToasts((x) => x.filter((y) => y.id !== t.id)); if (t.project) openChat(t.chatId, t.project).catch(() => {}); }}>
-            <span className={"t-ico" + (t.warn ? " warn" : "")}><Icon name={t.warn ? "hand" : "check"} size={14} /></span>
-            <span className="t-txt"><b>{t.title}</b><small>{nameOf(t.project) ? `${nameOf(t.project)} · ` : ""}{t.body}</small></span>
-          </div>
-        ))}
-      </div>
       <div className="chat-tabs">
         <div className="ctabs">
           {tabs.map((t) => {

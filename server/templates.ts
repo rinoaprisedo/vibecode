@@ -2,7 +2,8 @@ import { join } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { DATA_DIR } from "./paths";
 
-export type Template = { id: string; title: string; text: string };
+// `shortcut` (prompts): one modifier plus one key, e.g. "Alt+1" or "Ctrl+K"; sends the template from anywhere in the app.
+export type Template = { id: string; title: string; text: string; shortcut?: string };
 export type Templates = { prompts: Template[]; terminals: Template[] };
 
 const FILE = join(DATA_DIR, "templates.json");
@@ -31,7 +32,10 @@ const DEFAULTS = (): Templates => ({
 const clean = (list: unknown): Template[] =>
   (Array.isArray(list) ? list : []).slice(0, 500).flatMap((t: any) =>
     t && typeof t.title === "string" && typeof t.text === "string"
-      ? [{ id: typeof t.id === "string" && t.id ? t.id.slice(0, 40) : crypto.randomUUID().slice(0, 8), title: t.title.slice(0, 120), text: t.text.slice(0, 20_000) }]
+      ? [{
+          id: typeof t.id === "string" && t.id ? t.id.slice(0, 40) : crypto.randomUUID().slice(0, 8), title: t.title.slice(0, 120), text: t.text.slice(0, 20_000),
+          ...(typeof t.shortcut === "string" && /^(Ctrl|Alt|Meta)\+[A-Z0-9]$/.test(t.shortcut) ? { shortcut: t.shortcut } : {}),
+        }]
       : []);
 
 export const templates = {
