@@ -261,8 +261,12 @@ export function FileTree({ projects, activeId, versions, status, remote, tunnels
               {(() => {
                 const u = unpushed[p.id];
                 if (!u || (!u.files && !u.ahead)) return null;
-                const tip = [u.files ? `${u.files} changed file${u.files > 1 ? "s" : ""} not committed` : "", u.ahead ? `${u.ahead} commit${u.ahead > 1 ? "s" : ""} not pushed` : ""].filter(Boolean).join(", ");
-                return <span className="p-git" title={tip}><Icon name="branch" size={12} />{u.files + u.ahead}</span>;
+                return (
+                  <span className="p-git">
+                    {u.files > 0 && <span title={`${u.files} changed file${u.files > 1 ? "s" : ""}, not committed yet`}><Icon name="pencil" size={11} />{u.files}</span>}
+                    {u.ahead > 0 && <span title={`${u.ahead} commit${u.ahead > 1 ? "s" : ""} committed but not pushed`}><Icon name="upload" size={11} />{u.ahead}</span>}
+                  </span>
+                );
               })()}
               {remote[p.id]?.status === "connected" && <span className="p-remote" title="Remote Control is on: reachable from the Claude app"><Icon name="phone" size={12} /></span>}
               {status[p.id] && <span className={"h-dot " + status[p.id]} title={status[p.id] === "busy" ? "Claude is working here" : "Waiting for approval"} />}

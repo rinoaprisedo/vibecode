@@ -445,7 +445,8 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .r-foot { display: flex; align-items: center; gap: 8px; padding: 0 8px; }
 .r-foot select { flex: 1; min-width: 0; padding: 5px 8px; }
 .p-remote { color: var(--ok); display: inline-flex; }
-.p-git { color: var(--warn); display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.p-git > span { display: inline-flex; align-items: center; gap: 2px; }
+.p-git { color: var(--warn); display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 /* ---------- Image attachments ---------- */
 .attach-row { flex: 1 1 100%; order: 0; display: flex; flex-wrap: wrap; gap: 8px; padding: 2px 4px 8px; }
