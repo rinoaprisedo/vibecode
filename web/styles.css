@@ -640,6 +640,7 @@ kbd { font: 10.5px var(--mono); padding: 1px 6px; border-radius: 5px; border: 1p
 .tool-wrap .tool > .icon:last-child { margin-left: auto; flex: none; opacity: .6; }
 .tool-note { font-style: normal; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 0; }
 .tool-wrap.open .tool { width: 100%; }
+.tool-img { display: block; max-width: min(100%, 420px); max-height: 260px; margin: 4px 0 6px; border-radius: var(--r-md); border: 1px solid var(--border-strong); object-fit: contain; background: var(--elev); cursor: zoom-in; }
 .tool-body { margin: 4px 0 6px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--elev); font: 11.5px/1.5 var(--mono); max-height: 320px; overflow: auto; }
 .tool-path { color: var(--muted); margin-bottom: 6px; word-break: break-all; }
 .tool-why { color: var(--text); font-family: inherit; margin-bottom: 6px; }

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
-import { api, connect, imageUrl, uploadImage } from "../lib/api";
+import { api, connect, imageUrl, localImageUrl, uploadImage } from "../lib/api";
 import { isImage, MAX_ATTACHMENTS, toAttachment, type Attachment } from "../lib/images";
 import { LoginFlow } from "./LoginFlow";
 import { AccountMenu, type Account } from "./AccountMenu";
@@ -481,7 +481,7 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
         onScroll={(e) => { const el = e.currentTarget; if (!el.clientHeight) return; /* hidden (e.g. terminal open): browser resets scrollTop, not a user scroll */ stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60; }}>
         {items.map((it, i) => {
           if (it.kind === "tool") {
-            return <ToolItem key={i} name={it.name} input={it.input} />;
+            return <ToolItem key={i} name={it.name} input={it.input} project={tabs.find((t) => t.id === chatId)?.project ?? projectId} />;
           }
           if (it.kind === "permission") return null; // pending ones sit in the dock above the usage bar
           if (it.kind === "text") return <div key={i} className="msg text"><Markdown text={it.text} /><MsgMeta text={it.text} at={it.at} /></div>;
@@ -689,7 +689,7 @@ function UserMessage({ text, images, pinned, at }: { text: string; images?: stri
 }
 
 // A tool call: one-line chip (with Claude's own description of the step when it gave one); click to see everything.
-function ToolItem({ name, input }: { name: string; input: any }) {
+function ToolItem({ name, input, project }: { name: string; input: any; project: string }) {
   const [open, setOpen] = useState(false);
   const t = toolView(name, input);
   const why: string = name === "Bash" || name === "Task" || name === "Agent" ? input?.description ?? "" : "";
@@ -700,6 +700,8 @@ function ToolItem({ name, input }: { name: string; input: any }) {
   else if (name === "Write") body = <>{<div className="tool-path">{input?.file_path}</div>}<div className="tool-diff">{lines(String(input?.content ?? "").slice(0, 4000), "d-add")}</div></>;
   else if (name === "Bash") body = <>{why && <div className="tool-why">{why}</div>}<pre className="tool-pre">{input?.command}</pre></>;
   else body = <pre className="tool-pre">{JSON.stringify(input, null, 2)}</pre>;
+  // Reading a picture: show the picture itself under the chip (click to zoom) instead of only the path.
+  const isImg = name === "Read" && typeof input?.file_path === "string" && /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(input.file_path);
   return (
     <div className={"tool-wrap" + (open ? " open" : "")}>
       <div className={"tool t-" + t.tone} onClick={() => setOpen(!open)} title={open ? "Hide details" : "Show details"}>
@@ -707,6 +709,7 @@ function ToolItem({ name, input }: { name: string; input: any }) {
         {why && !open && <em className="tool-note">{why}</em>}
         <Icon name={open ? "chevronDown" : "chevronRight"} size={11} />
       </div>
+      {isImg && <img className="zoomable tool-img" src={localImageUrl(input.file_path, project)} alt={input.file_path} loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
       {open && <div className="tool-body">{body}</div>}
     </div>
   );

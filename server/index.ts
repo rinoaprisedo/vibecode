@@ -100,6 +100,15 @@ const start = (port: number) => Bun.serve<Data>({
         const img = await images.read(p.slice("/api/images/".length));
         return new Response(new Uint8Array(img.data), { headers: { "content-type": img.mime, "cache-control": "private, max-age=31536000, immutable" } });
       }
+      // An image file Claude read (any folder): served only for picture extensions, so the chat can show it inline.
+      if (p === "/api/localimg" && req.method === "GET") {
+        const ext = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.exec(q.get("path") ?? "")?.[1]?.toLowerCase();
+        if (!ext) return json({ error: "not an image" }, 400);
+        const root = (() => { try { return projects.get(q.get("project")).root; } catch { return anyRoot(); } })();
+        const file = Bun.file(resolve(root, q.get("path")!));
+        if (!(await file.exists())) return json({ error: "not found" }, 404);
+        return new Response(file, { headers: { "content-type": ext === "svg" ? "image/svg+xml" : ext === "jpg" ? "image/jpeg" : `image/${ext}`, "cache-control": "private, max-age=60" } });
+      }
       if (p === "/api/remote" && req.method === "GET") return json(remote.list());
       if (p === "/api/remote/start" && req.method === "POST") {
         const proj = projects.get(req.headers.get("x-project"));

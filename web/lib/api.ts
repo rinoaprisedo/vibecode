@@ -43,6 +43,7 @@ export function connect(onMessage: (m: any) => void) {
   return { send, close: () => listeners.delete(onMessage) };
 }
 
+export const localImageUrl = (path: string, project: string) => `/api/localimg?path=${encodeURIComponent(path)}&project=${encodeURIComponent(project)}&token=${token}`;
 export const imageUrl = (id: string) => `/api/images/${id}?token=${token}`;
 
 // Stores an image on the server (raw bytes, content-type = mime) and returns its id.
