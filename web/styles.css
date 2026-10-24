@@ -1317,3 +1317,12 @@ kbd { font: 10.5px var(--mono); padding: 1px 6px; border-radius: 5px; border: 1p
 .tpl-sc-in.set { color: var(--text); }
 .tpl-sc-in.rec { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); color: var(--accent-hi); }
 .sc-row { display: flex; align-items: center; gap: 10px; font-size: 13px; } .sc-row > span { flex: 1; }
+
+/* PostgreSQL browser as an editor-column tab (no popup, no extra column) */
+.pg-embed { flex: 1; min-height: 0; min-width: 0; display: flex; }
+.pg-embed[hidden] { display: none; }
+.pg-embed-root { flex: 1; min-width: 0; display: flex; }
+.pg-embed-panel { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--panel); }
+.tabs .tab-new { margin: 0 0 6px 4px; flex: none; align-self: center; }
+.term-embed { flex: 1; min-height: 0; }
+.w-stat { font-style: normal; font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; margin-left: 4px; }

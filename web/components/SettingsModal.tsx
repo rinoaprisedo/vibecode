@@ -66,7 +66,7 @@ export function SettingsModal({ accounts, refresh, onClose }: { accounts: Accoun
               <div key={k} className="sc-row">
                 <span>{SHORTCUT_LABELS[k]}</span>
                 <button type="button" data-shortcut-rec className={"tpl-sc-in" + (rec === k ? " rec" : "") + (sc[k] ? " set" : "")}
-                  onFocus={() => setRec(k)} onBlur={() => setRec(null)} onKeyDown={recordKey(k)} title="Click, then press a modifier + key">
+                  onClick={(e) => e.currentTarget.focus()} /* WebKit does not focus buttons on click */ onFocus={() => setRec(k)} onBlur={() => setRec(null)} onKeyDown={recordKey(k)} title="Click, then press a modifier + key">
                   {rec === k ? "Press keys…" : sc[k] ? pretty(sc[k]) : "Off"}
                 </button>
                 <button type="button" className="g-icon" style={{ visibility: sc[k] === DEFAULT_SHORTCUTS[k] ? "hidden" : "visible" }} title="Reset to default" onClick={() => { setShortcuts({ ...sc, [k]: DEFAULT_SHORTCUTS[k] }); setScErr(""); }}><Icon name="rotate" size={13} /></button>

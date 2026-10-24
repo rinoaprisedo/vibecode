@@ -350,7 +350,7 @@ function ConnForm({ project, initial, onSaved, onCancel }: { project: string; in
   );
 }
 
-export function PostgresPanel({ project, onClose }: { project: { id: string; name: string }; onClose: () => void }) {
+export function PostgresPanel({ project, onClose, embedded }: { project: { id: string; name: string }; onClose: () => void; embedded?: boolean }) {
   const [conns, setConns] = useState<Conn[]>([]);
   const [openIds, setOpenIds] = useState<string[]>([]);
   const [active, setActive] = useState<string>("home");       // "home" is the connection list
@@ -366,14 +366,14 @@ export function PostgresPanel({ project, onClose }: { project: { id: string; nam
   const edit = (c: Conn) => setForm({ ...c, password: "", url: "" });
 
   return (
-    <div className="modal-backdrop dk-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dk-panel">
-        <div className="dk-head">
+    <div className={embedded ? "pg-embed-root" : "modal-backdrop dk-backdrop"} onMouseDown={embedded ? undefined : (e) => e.target === e.currentTarget && onClose()}>
+      <div className={embedded ? "pg-embed-panel" : "dk-panel"}>
+        {!embedded && <div className="dk-head">
           <div className="dk-logo pg-logo"><Icon name="database" size={18} /></div>
           <div className="dk-title"><h3>PostgreSQL</h3><small>{project.name}</small></div>
           <span style={{ flex: 1 }} />
           <button onClick={onClose} title="Close"><Icon name="x" size={14} /></button>
-        </div>
+        </div>}
         <div className="dk-tabs pg-conntabs">
           <button className={active === "home" ? "on" : ""} onClick={() => setActive("home")}><Icon name="database" size={13} /> Connections</button>
           {openIds.map((id) => {

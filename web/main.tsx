@@ -17,7 +17,7 @@ import { Editor } from "./components/Editor";
 import { projectTint } from "./lib/projectColor";
 import { GitPanel } from "./components/GitPanel";
 import { ChatPanel } from "./components/ChatPanel";
-import { TerminalPanel, type TermRun } from "./components/TerminalPanel";
+import { TerminalView } from "./components/Terminal";
 import { Icon } from "./components/Icon";
 import { AddFolderMenu } from "./components/AddFolderMenu";
 import { SettingsModal } from "./components/SettingsModal";
@@ -31,7 +31,7 @@ import { TunnelModal, type TunnelInfo } from "./components/TunnelModal";
 import { DockerPanel, type DockerStatus } from "./components/DockerPanel";
 import { PostgresPanel } from "./components/PostgresPanel";
 
-type Tab = { key: string; project: string; path: string; content: string; dirty: boolean };
+type Tab = { key: string; project: string; path: string; content: string; dirty: boolean; kind?: "pg" | "term"; title?: string; command?: string }; // kind "pg" / "term": PostgreSQL browser or a terminal, shown as a tab in the editor column instead of a file
 const tabKey = (project: string, path: string) => `${project}:${path}`;
 
 function App() {
@@ -41,10 +41,6 @@ function App() {
   const [active, setActive] = useState("");
   const [versions, setVersions] = useState<Record<string, number>>({});
   const [side, setSide] = useState<"files" | "git">("files");
-  const [termOpen, setTermOpen] = useState(false);
-  const [termRun, setTermRun] = useState<TermRun | undefined>();
-  useEffect(() => { if (!termOpen) setTermRun(undefined); }, [termOpen]); // a stale run must not re-execute when the panel is reopened
-  const runInTerminal = useCallback((title: string, command: string) => { setTermRun((r) => ({ seq: (r?.seq ?? 0) + 1, title, command })); setTermOpen(true); }, []);
   const [status, setStatus] = useState<Record<string, "busy" | "waiting">>({});
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -54,7 +50,6 @@ function App() {
   const [tunnelFor, setTunnelFor] = useState("");
   useEffect(() => { api<{ tunnels: TunnelInfo[] }>("/api/tunnel/status").then((s) => setTunnels(s.tunnels)).catch(() => {}); }, []);
   const [dockerOpen, setDockerOpen] = useState(false);
-  const [pgFor, setPgFor] = useState("");
   const [docker, setDocker] = useState<DockerStatus | null>(null);
   // The status-bar badge: how many containers run. Checked quietly; the dashboard itself polls faster while open.
   useEffect(() => {
@@ -81,11 +76,14 @@ function App() {
   useEffect(() => { refreshAccounts(); }, []);
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
+  const activeRef = useRef(active); activeRef.current = active;
+  const activeIdRef = useRef(activeId); activeIdRef.current = activeId;
+  const projectsRef = useRef(projects); projectsRef.current = projects;
 
   // Keyboard shortcuts: Ctrl+` terminal, ⌘P / Ctrl+P quick open (captured so the browser never prints).
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key === "`") { e.preventDefault(); setTermOpen((o) => !o); }
+      if (e.ctrlKey && e.key === "`") { e.preventDefault(); toggleTerminalRef.current(); }
       else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "p") { e.preventDefault(); e.stopPropagation(); setQuickOpen((o) => !o); }
     };
     window.addEventListener("keydown", h, true);
@@ -117,7 +115,7 @@ function App() {
       else if (m.type === "fs-changed") {
         setVersions((v) => ({ ...v, [m.project]: (v[m.project] ?? 0) + 1 }));
         for (const t of tabsRef.current) {
-          if (t.project !== m.project || t.dirty) continue;
+          if (t.kind || t.project !== m.project || t.dirty) continue;
           api<{ content: string }>(`/api/file?path=${encodeURIComponent(t.path)}`, { project: t.project })
             .then(({ content }) => setTabs((cur) => cur.map((c) => (c.key === t.key && !c.dirty && c.content !== content ? { ...c, content } : c))))
             .catch(() => {});
@@ -139,8 +137,35 @@ function App() {
     setActiveId(projectId); // opening a file focuses its project
   }, []);
 
+  const openPostgres = (projectId: string) => {
+    const key = `pg:${projectId}`;
+    setTabs((t) => (t.some((x) => x.key === key) ? t : [...t, { key, project: projectId, path: "", content: "", dirty: false, kind: "pg" }]));
+    setActive(key);
+    setActiveId(projectId);
+  };
+  // Terminals are tabs of the editor column too. A new one starts in the focused project's folder; a template run opens one that executes its command.
+  const newTerminal = useCallback((title?: string, command?: string) => {
+    const id = crypto.randomUUID().slice(0, 8), pid = activeIdRef.current;
+    const name = title ?? projectsRef.current.find((p) => p.id === pid)?.name ?? "Terminal";
+    setTabs((t) => [...t, { key: `term:${id}`, project: pid, path: "", content: "", dirty: false, kind: "term", title: name, command }]);
+    setActive(`term:${id}`);
+  }, []);
+  const runInTerminal = useCallback((title: string, command: string) => newTerminal(title, command), [newTerminal]);
+  // Ctrl+` / the Terminal button: jump to a terminal (opening one if there is none); from a terminal, jump back to the last file.
+  const toggleTerminal = () => {
+    const cur = tabsRef.current.find((t) => t.key === activeRef.current);
+    if (cur?.kind === "term") {
+      const back = tabsRef.current.filter((t) => t.kind !== "term").at(-1);
+      if (back) setActive(back.key);
+      return;
+    }
+    const terms = tabsRef.current.filter((t) => t.kind === "term");
+    const mine = terms.filter((t) => t.project === activeIdRef.current).at(-1) ?? terms.at(-1);
+    if (mine) setActive(mine.key); else newTerminal();
+  };
+  const toggleTerminalRef = useRef(toggleTerminal); toggleTerminalRef.current = toggleTerminal;
   const tab = tabs.find((t) => t.key === active);
-  const save = () => tab && api("/api/file?path=" + encodeURIComponent(tab.path), { method: "PUT", body: { content: tab.content }, project: tab.project })
+  const save = () => tab && !tab.kind && api("/api/file?path=" + encodeURIComponent(tab.path), { method: "PUT", body: { content: tab.content }, project: tab.project })
     .then(() => setTabs((ts) => ts.map((t) => (t.key === tab.key ? { ...t, dirty: false } : t))));
   const closeTabs = (keys: string[]) => {
     const rest = tabs.filter((t) => !keys.includes(t.key));
@@ -162,13 +187,12 @@ function App() {
   const nameOf = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p.name])), [projects]);
 
   // Default is two columns (explorer | chat); an open file and the terminal slot in between, left to right.
-  const panes = (tabs.length ? 1 : 0) + (termOpen ? 1 : 0);
+  const panes = tabs.length ? 1 : 0;
   // Saved widths can be too wide for the window: shrink terminal, then chat, then explorer so the file column keeps 240px.
   const eff = (() => {
     const e = { ...w };
-    const termFixed = tabs.length > 0 && termOpen;
-    const need = () => e.side + (panes ? e.chat : 0) + (termFixed ? e.term : 0) + (tabs.length ? 240 : termOpen ? 260 : 0);
-    for (const [key, min] of [["term", 260], ["chat", 300], ["side", 200]] as const) {
+    const need = () => e.side + (panes ? e.chat : 0) + (tabs.length ? 240 : 0);
+    for (const [key, min] of [["chat", 300], ["side", 200]] as const) {
       const over = need() - vw;
       if (over > 0) e[key] = Math.max(min, e[key] - over);
     }
@@ -176,9 +200,9 @@ function App() {
   })();
   const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
   const room = (others: number) => window.innerWidth - others - 240; // keep at least 240px for the file column
-  const grow = (key: "side" | "term" | "chat", dir: 1 | -1, min: number) => (dx: number) =>
+  const grow = (key: "side" | "chat", dir: 1 | -1, min: number) => (dx: number) =>
     setW((cur) => {
-      const others = (key !== "side" ? eff.side : 0) + (key !== "chat" && panes ? eff.chat : 0) + (key !== "term" && tabs.length && termOpen ? eff.term : 0);
+      const others = (key !== "side" ? eff.side : 0) + (key !== "chat" && panes ? eff.chat : 0);
       return { ...cur, [key]: clamp(base.current + dir * dx, min, Math.max(min, room(others))) };
     });
   return (
@@ -196,12 +220,12 @@ function App() {
           </span>
         </div>
         {side === "files"
-          ? <FileTree projects={projects} activeId={activeId} versions={versions} status={status} remote={remote} tunnels={tunnels} onTunnel={setTunnelFor} onPostgres={setPgFor}
+          ? <FileTree projects={projects} activeId={activeId} versions={versions} status={status} remote={remote} tunnels={tunnels} onTunnel={setTunnelFor} onPostgres={openPostgres}
               onActivate={setActiveId} onRemove={removeFolder} onOpen={open}
               onChanged={(id) => setVersions((v) => ({ ...v, [id]: (v[id] ?? 0) + 1 }))} onRenamed={renameTabs} onDeleted={deleteTabs} />
           : project && <GitPanel key={project.id} project={project.id} projectName={project.name} version={versions[project.id] ?? 0} onOpen={(p) => open(project.id, p)} />}
         <div className="statusbar">
-          <button className={termOpen ? "on" : ""} onClick={() => setTermOpen((o) => !o)} title="Ctrl+`"><Icon name="terminal" size={14} /> Terminal</button>
+          <button className={tab?.kind === "term" ? "on" : ""} onClick={toggleTerminal} title="Ctrl+`"><Icon name="terminal" size={14} /> Terminal</button>
           <button onClick={() => setDockerOpen(true)} title="Docker">
             <Icon name="docker" size={14} /> Docker
             {docker?.state === "running" && <span className={"dk-badge" + (docker.running ? "" : " off")}>{docker.running}</span>}
@@ -213,37 +237,47 @@ function App() {
         <main className="main">
           <div className="tabs">
             {tabs.map((t, i) => (
-              <div key={t.key} className={"tab" + (t.key === active ? " on" : "")} title={`${nameOf[t.project] ?? ""}/${t.path}`}
+              <div key={t.key} className={"tab" + (t.key === active ? " on" : "")} title={t.kind === "pg" ? `PostgreSQL · ${nameOf[t.project] ?? ""}` : t.kind === "term" ? `Terminal in ${nameOf[t.project] ?? ""}` : `${nameOf[t.project] ?? ""}/${t.path}`}
                 onClick={() => { setActive(t.key); setActiveId(t.project); }}
                 onContextMenu={(e) => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY, index: i }); }}>
-                {t.path.split("/").pop()}{t.dirty ? " ●" : ""}
+                {t.kind === "pg" ? <><Icon name="database" size={13} /> PostgreSQL</> : t.kind === "term" ? <><Icon name="terminal" size={13} /> {t.title}</> : t.path.split("/").pop()}{t.dirty ? " ●" : ""}
                 {projects.length > 1 && <span className="tab-proj" style={projectTint(projects, t.project)}>{nameOf[t.project]}</span>}
                 <span className="x" onClick={(e) => { e.stopPropagation(); close(t.key); }}><Icon name="x" size={13} /></span>
               </div>
             ))}
+            <button className="g-icon tab-new" style={{ visibility: "visible" }} title="New terminal" onClick={() => newTerminal()}><Icon name="plus" size={14} /></button>
           </div>
-          <Editor
-            key={tab.key} path={tab.path} content={tab.content} onSave={save}
-            onChange={(v) => setTabs((ts) => ts.map((t) => (t.key === tab.key ? { ...t, dirty: true, content: v } : t)))}
-          />
+          {/* PostgreSQL tabs stay mounted (hidden) while another tab is active, so open connections and queries survive */}
+          {tabs.filter((t) => t.kind === "pg" && projects.some((p) => p.id === t.project)).map((t) => (
+            <div key={t.key} className="pg-embed" hidden={t.key !== active}>
+              <PostgresPanel embedded project={projects.find((p) => p.id === t.project)!} onClose={() => close(t.key)} />
+            </div>
+          ))}
+          {/* terminals stay mounted too: their shells keep running behind other tabs */}
+          <div className="term-body term-embed" style={{ display: tab.kind === "term" ? "block" : "none" }}>
+            {tabs.filter((t) => t.kind === "term").map((t) => (
+              <TerminalView key={t.key} id={t.key.slice(5)} project={t.project} active={t.key === active} command={t.command} onExit={() => close(t.key)} />
+            ))}
+          </div>
+          {!tab.kind && (
+            <Editor
+              key={tab.key} path={tab.path} content={tab.content} onSave={save}
+              onChange={(v) => setTabs((ts) => ts.map((t) => (t.key === tab.key ? { ...t, dirty: true, content: v } : t)))}
+            />
+          )}
         </main>
       )}
-      {termOpen && project && (<>
-        {tab && <Resizer onStart={() => (base.current = eff.term)} onDrag={grow("term", -1, 260)} />}
-        <TerminalPanel project={project} width={tab ? eff.term : undefined} onClose={() => setTermOpen(false)} run={termRun} />
-      </>)}
       {panes > 0 && <Resizer onStart={() => (base.current = eff.chat)} onDrag={grow("chat", -1, 300)} />}
       <ChatPanel projects={projects} projectId={activeId} onFocusProject={setActiveId} onStatus={setStatus}
         accounts={accounts} refreshAccounts={refreshAccounts} openSettings={() => setSettingsOpen(true)} onRunInTerminal={runInTerminal}
         project={project} remote={project ? remote[project.id] : undefined} width={panes ? eff.chat : undefined} />
       {quickOpen && project && (
         <QuickOpen project={project}
-          recent={tabs.filter((t) => t.project === project.id).map((t) => t.path).reverse()}
+          recent={tabs.filter((t) => !t.kind && t.project === project.id).map((t) => t.path).reverse()}
           onOpen={(path) => open(project.id, path)} onClose={() => setQuickOpen(false)} />
       )}
       {ctx && <ContextMenu x={ctx.x} y={ctx.y} onClose={() => setCtx(null)} items={tabMenu(tabs.map((t) => t.key), ctx.index, closeTabs)} />}
       {tunnelFor && projects.find((p) => p.id === tunnelFor) && <TunnelModal project={projects.find((p) => p.id === tunnelFor)!} tunnels={tunnels} onClose={() => setTunnelFor("")} />}
-      {pgFor && projects.find((p) => p.id === pgFor) && <PostgresPanel project={projects.find((p) => p.id === pgFor)!} onClose={() => setPgFor("")} />}
       {dockerOpen && project && <DockerPanel project={project.id} projectName={project.name} onClose={() => setDockerOpen(false)} onStatus={setDocker} />}
       {projectsLoaded && projects.length === 0 && !settingsOpen && (
         <WelcomeModal accounts={accounts} onAdded={setActiveId} onSignIn={() => setSettingsOpen(true)} />

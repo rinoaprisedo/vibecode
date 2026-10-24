@@ -28,7 +28,7 @@ type Item =
   | { kind: "permission"; id: string; tool: string; input: any; answered?: boolean };
 
 // Everything about one session. Sessions keep running (and receiving events) while another is on screen.
-type ChatState = { items: Item[]; busy: boolean; claudeSession?: string; context?: Context; project?: string; account?: string };
+type ChatState = { items: Item[]; busy: boolean; tokens?: number; claudeSession?: string; context?: Context; project?: string; account?: string };
 const EMPTY: ChatState = { items: [], busy: false };
 
 const titleOf = (c?: ChatState) => {
@@ -263,6 +263,7 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
         setUsageKey((k) => k + 1);
         refreshAccounts();
       }
+      else if (m.type === "tokens") patch(m.chatId, (c) => ({ ...c, tokens: m.out }));
       else if (m.type === "context") patch(m.chatId, (c) => ({ ...c, context: { used: m.used, max: m.max } }));
       else if (m.type === "permission") {
         push(m.chatId, { kind: "permission", id: m.id, tool: m.tool, input: m.input });
@@ -488,7 +489,7 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
           if (it.kind === "user") return <UserMessage key={i} text={it.text} at={it.at} images={it.images} pinned={i === lastUser} />;
           return <div key={i} className={`msg ${it.kind}`}>{it.text}</div>;
         })}
-        {busy && <Working onShow={() => stick.current && toBottom()} />}
+        {busy && <Working tokens={store[chatId]?.tokens ?? 0} onShow={() => stick.current && toBottom()} />}
         <div ref={end} />
       </div>
       {pendingPerms.length > 0 && (
@@ -640,14 +641,19 @@ function PlanDock({ plan, onApprove, onRevise }: { plan: string; onApprove: (aut
 
 // "Claude is working" indicator: shimmering text that cycles through a few phrases, with bouncing dots.
 const PHRASES = ["wait, cooking", "dev by rinoaprisedo.com", "thinking it through", "reading the code", "dev by rinoaprisedo.com", "almost there", "still cooking"];
-function Working({ onShow }: { onShow: () => void }) {
+const fmtTok = (n: number) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n));
+function Working({ onShow, tokens }: { onShow: () => void; tokens: number }) {
   const [n, setN] = useState(0);
-  useEffect(() => { onShow(); const t = setInterval(() => setN((x) => (x + 1) % PHRASES.length), 4500); return () => clearInterval(t); }, []);
+  const t0 = useRef(Date.now());
+  const [secs, setSecs] = useState(0);
+  useEffect(() => { onShow(); const t = setInterval(() => setN((x) => (x + 1) % PHRASES.length), 4500); const c = setInterval(() => setSecs(Math.floor((Date.now() - t0.current) / 1000)), 1000); return () => { clearInterval(t); clearInterval(c); }; }, []);
+  const clock = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
   return (
     <div className="working" role="status" aria-label="Claude is working">
       <span className="w-spark"><Icon name="sparkle" size={13} /></span>
       <span key={n} className="w-text">{PHRASES[n]}</span>
       <span className="w-dots"><i /><i /><i /></span>
+      <span className="w-stat">{clock}{tokens > 0 ? ` · ↓ ${fmtTok(tokens)} tokens` : ""}</span>
     </div>
   );
 }

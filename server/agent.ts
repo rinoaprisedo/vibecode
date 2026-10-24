@@ -83,6 +83,10 @@ export function makeAgent(send: Send) {
       const abort = new AbortController();
       let lastText = "";
       let lastUsage: any, lastModel = "";
+      // Live output-token counter for the "working" row: exact numbers once a message completes, a ~4 chars/token estimate while it streams.
+      let doneTok = 0, curTok = 0, sentAt = 0;
+      const sendTok = (force = false) => { const now = Date.now(); if (force || now - sentAt > 200) { sentAt = now; out({ type: "tokens", out: doneTok + curTok }); } };
+      sendTok(true);
       runs.set(chatId, abort);
       try {
         const tried = new Set<string>([account.id]);
@@ -117,6 +121,7 @@ export function makeAgent(send: Send) {
             settings: opts.ultracode ? { ultracode: true } : undefined,
             model: opts.model || undefined,
             abortController: abort,
+            includePartialMessages: true,
             resume: resume || undefined,
             canUseTool: async (toolName, input) => {
               const id = crypto.randomUUID();
@@ -147,6 +152,14 @@ export function makeAgent(send: Send) {
             const next = await pickFallback(root, tried);
             if (next) { switchTo = next; stream.close(); break; } // swallow the limit messages and carry on elsewhere
           }
+          if (m.type === "stream_event") { // token progress only; the deltas themselves are not forwarded
+            const ev = (m as any).event;
+            if (ev?.type === "message_start") curTok = 0;
+            else if (ev?.type === "content_block_delta") { const d = ev.delta; curTok += Math.ceil(String(d?.text ?? d?.thinking ?? d?.partial_json ?? "").length / 4); sendTok(); }
+            else if (ev?.type === "message_delta" && typeof ev.usage?.output_tokens === "number") { curTok = ev.usage.output_tokens; sendTok(); }
+            continue;
+          }
+          if (m.type === "assistant") { doneTok += (m as any).message?.usage?.output_tokens ?? curTok; curTok = 0; sendTok(true); }
           if (m.type === "assistant" && !m.parent_tool_use_id) { lastUsage = m.message.usage; lastModel = m.message.model; }
           if (m.type === "result" && lastUsage) {
             // Context in use = what the last main-loop call read plus what it wrote.

@@ -116,7 +116,7 @@ export function TemplateMenu({ onSend, onToChat, onRun }: {
                 <div className="tpl-sc">
                   <span>Shortcut</span>
                   <button type="button" data-shortcut-rec className={"tpl-sc-in" + (recording ? " rec" : "") + (draft.shortcut ? " set" : "")}
-                    onFocus={() => setRecording(true)} onBlur={() => setRecording(false)} onKeyDown={recordKey}
+                    onClick={(e) => e.currentTarget.focus()} /* WebKit does not focus buttons on click */ onFocus={() => setRecording(true)} onBlur={() => setRecording(false)} onKeyDown={recordKey}
                     title="Click, then press a modifier + key. Backspace clears it.">
                     {recording ? "Press keys…" : draft.shortcut ? pretty(draft.shortcut) : "None"}
                   </button>
