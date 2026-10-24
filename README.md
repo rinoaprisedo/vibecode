@@ -77,7 +77,7 @@ Server hanya bisa dijangkau dari komputer ini dan memakai token acak per sesi.
 ## Membuat `.dmg`
 
 ```bash
-./scripts/build-app.sh             # Apple Silicon -> build/Vibecoder-<versi>-arm64.dmg
+./scripts/build-app.sh             # Apple Silicon -> build/macos/Vibecoder-<versi>-arm64.dmg
 ```
 
 Versi universal membutuhkan biner Claude Code untuk Intel (versi yang sama dengan yang arm64):
@@ -92,7 +92,7 @@ X64_CLAUDE=$PWD/package/claude ./scripts/build-universal.sh
 Bisa dibuat dari Mac (cross-compile), butuh Bun, npm, dan python3:
 
 ```bash
-./scripts/build-windows.sh         # -> build/Vibecoder-<versi>-win-x64.zip
+./scripts/build-windows.sh         # -> build/windows/Vibecoder-Setup-<versi>-x64.exe
 ```
 
 Hasilnya folder `Vibecoder/` berisi `Vibecoder.cmd` (klik dua kali), `server/vibecode-server.exe`, `web/`, dan `claude/claude.exe`. UI dibuka di jendela app Microsoft Edge (atau Chrome/Brave); menutup jendela menghentikan server. Data tersimpan di `%APPDATA%\Vibecode`. Terminal di Windows berbasis baris (PowerShell lewat pipe). Belum ditandatangani, jadi SmartScreen akan memberi peringatan.
@@ -102,7 +102,7 @@ Hasilnya folder `Vibecoder/` berisi `Vibecoder.cmd` (klik dua kali), `server/vib
 Satu tarball untuk x86_64 dan aarch64. Build dari Mac atau Linux (cross-compile), butuh Bun, npm, dan python3:
 
 ```bash
-./scripts/build-linux.sh           # -> build/Vibecoder-<versi>-linux.tar.gz
+./scripts/build-linux.sh           # -> build/linux/Vibecoder-<versi>-linux.tar.gz
 ```
 
 Pengguna: ekstrak, lalu `./install.sh` (tanpa root; ke `~/.local/share/vibecoder`, perintah `vibecoder`, dan menu aplikasi, hanya build untuk CPU-nya yang disalin). `./bin/vibecoder` menjalankan tanpa memasang, `./uninstall.sh` menghapus.

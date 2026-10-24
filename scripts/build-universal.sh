@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds build/universal/Vibecoder.app and build/Vibecoder-<version>-universal.dmg: one app that runs on Apple Silicon
+# Builds build/macos/Vibecoder-<version>-universal.dmg (intermediates in build/.work/macos/universal): one app that runs on Apple Silicon
 # and Intel Macs. The Swift launcher is a fat binary; the Bun server and Claude Code ship once per CPU type.
 #
 # Needs the Intel Claude Code binary (same version as the arm64 one), for example:
@@ -11,9 +11,9 @@ cd "$(dirname "$0")/.."
 VERSION="${VERSION:-1.0.1}"
 ARM_CLAUDE="node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude"
 X64_CLAUDE="${X64_CLAUDE:?set X64_CLAUDE to the Intel Claude Code binary}"
-OUT="build/universal"
+OUT="build/.work/macos/universal"; mkdir -p build/macos
 APP="$OUT/Vibecoder.app"
-DMG="build/Vibecoder-${VERSION}-universal.dmg"
+DMG="build/macos/Vibecoder-${VERSION}-universal.dmg"
 
 [ -x "$ARM_CLAUDE" ] || { echo "missing $ARM_CLAUDE (run: bun install)"; exit 1; }
 [ -x "$X64_CLAUDE" ] || { echo "missing $X64_CLAUDE"; exit 1; }

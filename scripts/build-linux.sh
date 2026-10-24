@@ -1,37 +1,38 @@
 #!/usr/bin/env bash
 # Cross-builds ONE Linux release tarball for both x86_64 and aarch64, from a Mac/Linux box:
-#   ./scripts/build-linux.sh        ->  build/Vibecoder-<version>-linux.tar.gz
+#   ./scripts/build-linux.sh        ->  build/linux/Vibecoder-<version>-linux.tar.gz
 # The install script (and the launcher) pick the right build for the CPU. Includes a PKGBUILD for Arch.
-# Needs bun, npm, python3; sips (macOS) or a ready build/Vibecoder-512.png for the icon.
+# Needs bun, npm, python3; sips (macOS) or a ready build/.work/linux/Vibecoder-512.png for the icon.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-1.0.1}"
+VERSION="${VERSION:-1.0.2}"
 NAME="vibecoder-${VERSION}-linux"
-OUT="build/linux/${NAME}"
-TAR="build/Vibecoder-${VERSION}-linux.tar.gz"
+W="build/.work/linux"; mkdir -p "$W" build/linux
+OUT="$W/stage/${NAME}"
+TAR="build/linux/Vibecoder-${VERSION}-linux.tar.gz"
 SDK_VERSION="$(bun -e "console.log(require('./node_modules/@anthropic-ai/claude-agent-sdk/package.json').version)")"
 
 echo "==> Icon"
-if [ ! -f build/Vibecoder-512.png ]; then
-  if command -v sips >/dev/null; then sips -z 512 512 Logo-Vibecoder.png --out build/Vibecoder-512.png >/dev/null; else cp Logo-Vibecoder.png build/Vibecoder-512.png; fi
+if [ ! -f $W/Vibecoder-512.png ]; then
+  if command -v sips >/dev/null; then sips -z 512 512 Logo-Vibecoder.png --out $W/Vibecoder-512.png >/dev/null; else cp Logo-Vibecoder.png $W/Vibecoder-512.png; fi
 fi
 
 echo "==> UI bundle";     bun run build:web
 
-rm -rf "$OUT"; mkdir -p "$OUT/bin" "$OUT/web/dist" "$OUT/share"
+rm -rf "$W/stage"; mkdir -p "$OUT/bin" "$OUT/web/dist" "$OUT/share"
 for ARCH in x64 arm64; do
   echo "==> linux-${ARCH}: Claude Code ${SDK_VERSION} + server"
-  CLAUDE="build/linux-claude-${ARCH}/package/claude"
+  CLAUDE="$W/claude-${ARCH}/package/claude"
   if [ ! -f "$CLAUDE" ]; then
-    rm -rf "build/linux-claude-${ARCH}"; mkdir -p "build/linux-claude-${ARCH}"
-    (cd "build/linux-claude-${ARCH}" && npm pack "@anthropic-ai/claude-agent-sdk-linux-${ARCH}@${SDK_VERSION}" --silent && tar -xzf ./*.tgz)
+    rm -rf "$W/claude-${ARCH}"; mkdir -p "$W/claude-${ARCH}"
+    (cd "$W/claude-${ARCH}" && npm pack "@anthropic-ai/claude-agent-sdk-linux-${ARCH}@${SDK_VERSION}" --silent && tar -xzf ./*.tgz)
   fi
   [ -f "$CLAUDE" ] || { echo "claude binary not found in the linux-${ARCH} package"; exit 1; }
-  bun build --compile --target="bun-linux-${ARCH}" server/index.ts --outfile "build/vibecode-server-linux-${ARCH}"
+  bun build --compile --target="bun-linux-${ARCH}" server/index.ts --outfile "$W/vibecode-server-${ARCH}"
   rm -f .*.bun-build
   mkdir -p "$OUT/${ARCH}/server" "$OUT/${ARCH}/claude"
-  cp "build/vibecode-server-linux-${ARCH}" "$OUT/${ARCH}/server/vibecode-server"
+  cp "$W/vibecode-server-${ARCH}" "$OUT/${ARCH}/server/vibecode-server"
   cp "$CLAUDE" "$OUT/${ARCH}/claude/claude"
   chmod +x "$OUT/${ARCH}/server/vibecode-server" "$OUT/${ARCH}/claude/claude"
 done
@@ -42,7 +43,8 @@ cp web/dist/main.js web/dist/main.css "$OUT/web/dist/"
 cp packaging/linux/vibecoder "$OUT/bin/vibecoder"
 cp packaging/linux/install.sh packaging/linux/uninstall.sh "$OUT/"
 cp packaging/linux/vibecoder.desktop "$OUT/share/"
-cp build/Vibecoder-512.png "$OUT/share/vibecoder.png"
+cp docs/PANDUAN-INSTALASI.md "$OUT/"
+cp $W/Vibecoder-512.png "$OUT/share/vibecoder.png"
 sed -e "s|@VERSION@|$VERSION|" packaging/arch/PKGBUILD.in > "$OUT/PKGBUILD"
 chmod +x "$OUT/bin/vibecoder" "$OUT/install.sh" "$OUT/uninstall.sh"
 cat > "$OUT/README-Linux.txt" <<'TXT'
@@ -63,6 +65,6 @@ Logins, chats and the folder list are kept in ~/.config/Vibecoder (delete it to 
 TXT
 
 echo "==> Tarball"
-rm -f "$TAR" build/Vibecoder-*-linux-x64.tar.gz build/Vibecoder-*-linux-arm64.tar.gz build/PKGBUILD
-COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -C build/linux -czf "$TAR" "$NAME" 2>/dev/null || COPYFILE_DISABLE=1 tar -C build/linux -czf "$TAR" "$NAME"
+rm -f "$TAR"
+COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -C "$W/stage" -czf "$TAR" "$NAME" 2>/dev/null || COPYFILE_DISABLE=1 tar -C "$W/stage" -czf "$TAR" "$NAME"
 echo "Done: $TAR ($(du -h "$TAR" | cut -f1))  sha256 $(shasum -a 256 "$TAR" | cut -d' ' -f1)"

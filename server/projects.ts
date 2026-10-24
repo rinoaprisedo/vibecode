@@ -35,12 +35,16 @@ export function makeProjects(onFsChanged: (projectId: string, path: string | nul
       .then(() => writeFile(FILE, JSON.stringify({ open: [...projects.values()].map((p) => p.root), recent })));
 
   const watchProject = (p: Project) => {
-    watchers.set(p.id, watch(p.root, { recursive: true }, (_e, name) => {
+    const w = watch(p.root, { recursive: true }, (_e, name) => {
       if (name && /(^|\/)(\.git\/(?!index$)|node_modules)/.test(name)) return;
       clearTimeout(timers.get(p.id));
       p.fs.invalidate(); // the file list used by quick-open is stale now
       timers.set(p.id, setTimeout(() => onFsChanged(p.id, name), 150));
-    }));
+    });
+    // A folder inside the project that this user may not read (e.g. a database's data dir owned by a Docker container,
+    // or a deleted/renamed directory) makes the watcher emit an error. Unhandled, that kills the whole server, so ignore it.
+    w.on("error", (e: any) => console.warn(`vibecode: file watcher for ${p.root}: ${e?.code ?? ""} ${e?.message ?? e}`));
+    watchers.set(p.id, w);
   };
 
   async function add(path: string, persist = true): Promise<Project> {
