@@ -214,12 +214,23 @@ export function FileTree({ projects, activeId, versions, status, remote, tunnels
 
   // Untracked and gitignored paths per project (git reports untracked folders as "dir/"); the tree greys them out.
   const [grey, setGrey] = useState<Record<string, string[]>>({});
+  // Per project: files changed since the last commit, and commits not pushed yet. Shown as a marker on the folder row.
+  const [unpushed, setUnpushed] = useState<Record<string, { files: number; ahead: number }>>({});
   const stamp = projects.map((p) => `${p.id}:${versions[p.id] ?? 0}:${bump[p.id] ?? 0}`).join(",");
-  useEffect(() => {
+  const refreshGit = () =>
     projects.forEach((p) =>
-      api<{ files: { x: string; path: string }[]; ignored?: string[] }>("/api/git/status", { project: p.id })
-        .then((st) => setGrey((g) => ({ ...g, [p.id]: [...st.files.filter((f) => f.x === "?").map((f) => f.path), ...(st.ignored ?? [])] })))
-        .catch(() => setGrey((g) => ({ ...g, [p.id]: [] }))));
+      api<{ files: { x: string; path: string }[]; ahead?: number; ignored?: string[] }>("/api/git/status", { project: p.id })
+        .then((st) => {
+          setUnpushed((u) => ({ ...u, [p.id]: { files: st.files.length, ahead: st.ahead ?? 0 } }));
+          setGrey((g) => ({ ...g, [p.id]: [...st.files.filter((f) => f.x === "?").map((f) => f.path), ...(st.ignored ?? [])] }));
+        })
+        .catch(() => { setGrey((g) => ({ ...g, [p.id]: [] })); setUnpushed((u) => ({ ...u, [p.id]: { files: 0, ahead: 0 } })); }));
+  useEffect(() => { refreshGit(); }, [stamp]);
+  // A commit or push done in the terminal changes no watched file, so also re-check periodically and when the window regains focus.
+  useEffect(() => {
+    const t = setInterval(refreshGit, 15000);
+    window.addEventListener("focus", refreshGit);
+    return () => { clearInterval(t); window.removeEventListener("focus", refreshGit); };
   }, [stamp]);
 
   const ctx: TreeCtx = {
@@ -247,6 +258,12 @@ export function FileTree({ projects, activeId, versions, status, remote, tunnels
                 <Icon name={expanded[p.id] ? "chevronDown" : "chevronRight"} size={14} className="chev" />
               </span>
               <span className="p-name">{p.name}</span>
+              {(() => {
+                const u = unpushed[p.id];
+                if (!u || (!u.files && !u.ahead)) return null;
+                const tip = [u.files ? `${u.files} changed file${u.files > 1 ? "s" : ""} not committed` : "", u.ahead ? `${u.ahead} commit${u.ahead > 1 ? "s" : ""} not pushed` : ""].filter(Boolean).join(", ");
+                return <span className="p-git" title={tip}><Icon name="branch" size={12} />{u.files + u.ahead}</span>;
+              })()}
               {remote[p.id]?.status === "connected" && <span className="p-remote" title="Remote Control is on: reachable from the Claude app"><Icon name="phone" size={12} /></span>}
               {status[p.id] && <span className={"h-dot " + status[p.id]} title={status[p.id] === "busy" ? "Claude is working here" : "Waiting for approval"} />}
               <span className="p-play p-db" style={{ cursor: "pointer" }} title="PostgreSQL" onClick={(e) => { e.stopPropagation(); onPostgres(p.id); }}>

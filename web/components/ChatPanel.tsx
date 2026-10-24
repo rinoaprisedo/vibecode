@@ -639,7 +639,7 @@ function PlanDock({ plan, onApprove, onRevise }: { plan: string; onApprove: (aut
 }
 
 // "Claude is working" indicator: shimmering text that cycles through a few phrases, with bouncing dots.
-const PHRASES = ["wait, cooking", "dev by rinoaprisedo.com", "rinoaprisedo typing", "thinking it through", "rinoaprisedo read files", "reading the code", "dev by rinoaprisedo.com", "rinoaprisedo found problem", "almost there", "still cooking"];
+const PHRASES = ["wait, cooking", "dev by rinoaprisedo.com", "thinking it through", "reading the code", "dev by rinoaprisedo.com", "almost there", "still cooking"];
 function Working({ onShow }: { onShow: () => void }) {
   const [n, setN] = useState(0);
   useEffect(() => { onShow(); const t = setInterval(() => setN((x) => (x + 1) % PHRASES.length), 4500); return () => clearInterval(t); }, []);

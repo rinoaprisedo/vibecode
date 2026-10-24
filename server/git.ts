@@ -96,7 +96,8 @@ export const makeGit = (root: string) => {
       const branch = lines[0]?.startsWith("##") ? lines.shift()!.slice(3) : "";
       const all = lines.map((l) => ({ x: l[0], y: l[1], path: l.slice(3) }));
       // "!!" entries are gitignored paths: not changes, but the explorer greys them out like untracked ones.
-      return { branch, files: all.filter((f) => f.x !== "!"), ignored: all.filter((f) => f.x === "!").map((f) => f.path) };
+      const ahead = Number(/\[ahead (\d+)/.exec(branch)?.[1] ?? 0); // commits not pushed yet
+      return { branch, ahead, files: all.filter((f) => f.x !== "!"), ignored: all.filter((f) => f.x === "!").map((f) => f.path) };
     },
     diff: (path: string, staged: boolean) => git(["diff", ...(staged ? ["--cached"] : []), "--", path], true),
     stage: (path: string) => git(["add", "--", path]),
