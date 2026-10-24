@@ -90,7 +90,7 @@ export function GitPanel({ project, projectName, version, onOpen }: { project: s
   const [msg, setMsg] = useState("");
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
-  const [history, setHistory] = useState<{ upstream: string; commits: Commit[] } | null>(null);
+  const [history, setHistory] = useState<{ upstream: string; ahead?: number; commits: Commit[] } | null>(null);
   const [histOpen, setHistOpen] = useState(true);
   type Note = { ok: boolean; text: string; fix?: FixKind; retry?: () => void; retryLabel?: string };
   const [note, setNote] = useState<Note | null>(null);
@@ -196,7 +196,7 @@ export function GitPanel({ project, projectName, version, onOpen }: { project: s
             <Icon name={histOpen ? "chevronDown" : "chevronRight"} size={12} />
             <span>Commits</span>
             <span className="g-count">{history.commits.length}</span>
-            {history.commits.some((c) => !c.pushed) && <span className="gc-pending">{history.commits.filter((c) => !c.pushed).length} to push</span>}
+            {(history.ahead ?? history.commits.filter((c) => !c.pushed).length) > 0 && <span className="gc-pending">{history.ahead ?? history.commits.filter((c) => !c.pushed).length} to push</span>}
           </div>
           {histOpen && history.commits.map((c) => <CommitRow key={c.hash} c={c} call={call} />)}
         </div>

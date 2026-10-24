@@ -283,6 +283,18 @@ function ConnForm({ project, initial, onSaved, onCancel }: { project: string; in
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((x) => ({ ...x, [k]: v }));
   const body = () => { const { url, ...rest } = f; return { ...rest, project }; };
 
+  // A new connection starts filled from the project's running PostgreSQL container (the first match), with the others offered as chips.
+  type Guess = { container: string; image: string; host: string; port: number; database: string; user: string; password: string; inProject: boolean };
+  const [guesses, setGuesses] = useState<Guess[]>([]);
+  const [picked, setPicked] = useState("");
+  const apply = (g: Guess) => { setPicked(g.container); setF((x) => ({ ...x, name: g.container, host: g.host, port: g.port, database: g.database, user: g.user, password: g.password })); };
+  useEffect(() => {
+    if (initial.id) return;
+    let live = true;
+    api<Guess[]>("/api/pg/detect", { project }).then((list) => { if (live && list.length) { setGuesses(list); apply(list[0]); } }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+
   const test = async () => {
     setBusy(true); setMsg(null);
     try { const r = await call<{ version: string; database: string }>("test", body()); setMsg({ text: `Connected to ${r.database} · ${r.version}` }); }
@@ -298,6 +310,18 @@ function ConnForm({ project, initial, onSaved, onCancel }: { project: string; in
   return (
     <div className="pg-form">
       <h3>{f.id ? "Edit connection" : "New connection"}</h3>
+      {guesses.length > 0 && (
+        <div className="pg-msg">
+          Found running PostgreSQL in Docker{guesses.length > 1 ? " — pick one:" : ":"}
+          <div className="pg-row" style={{ flexWrap: "wrap", marginTop: 6 }}>
+            {guesses.map((g) => (
+              <button key={g.container} type="button" className={picked === g.container ? "primary" : ""} onClick={() => apply(g)} title={`${g.image} · ${g.user}@localhost:${g.port}/${g.database}`}>
+                {g.container} :{g.port}{g.inProject ? " ★" : ""}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <label>Connection string <small className="faint">(optional, fills the fields below)</small>
         <input value={f.url} placeholder="postgres://user:password@host:5432/database" spellCheck={false}
           onChange={(e) => setF((x) => fromUrl(e.target.value, { ...x, url: e.target.value }))} />

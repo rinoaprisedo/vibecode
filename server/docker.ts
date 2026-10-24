@@ -293,3 +293,29 @@ export function makeDockerLogs(send: (m: unknown) => void) {
     closeAll: () => [...procs.keys()].forEach(close),
   };
 }
+
+// Running PostgreSQL containers, with the credentials from their environment and the port published on this machine.
+// Containers whose compose folder lies inside the project come first, so a click on "database" lands on the project's own DB.
+export type PgGuess = { container: string; image: string; host: string; port: number; database: string; user: string; password: string; inProject: boolean };
+export async function detectPostgres(root: string): Promise<PgGuess[]> {
+  if (!dockerBin()) return [];
+  const ps = rows(await must(["ps", "--no-trunc", "--format", "{{json .}}"]).catch(() => ""));
+  const ids = ps.filter((c) => /postgres|postgis|timescale|pgvector|supabase\/postgres/i.test(String(c.Image)) || /(?:^|[ ,>:])5432\/tcp/.test(String(c.Ports))).map((c) => String(c.ID));
+  if (!ids.length) return [];
+  const info: any[] = JSON.parse((await must(["inspect", ...ids]).catch(() => "[]")) || "[]");
+  const norm = (d: string) => d.replace(/\/+$/, "");
+  const out: PgGuess[] = [];
+  for (const c of info) {
+    const env: Record<string, string> = Object.fromEntries((c.Config?.Env ?? []).map((e: string) => { const i = e.indexOf("="); return [e.slice(0, i), e.slice(i + 1)]; }));
+    const bound = c.NetworkSettings?.Ports?.["5432/tcp"]?.[0]?.HostPort;
+    if (!bound) continue; // not reachable from this machine
+    const user = env.POSTGRES_USER || env.POSTGRESQL_USERNAME || "postgres";
+    const dir = norm(c.Config?.Labels?.["com.docker.compose.project.working_dir"] ?? "");
+    out.push({
+      container: String(c.Name ?? "").replace(/^\//, ""), image: String(c.Config?.Image ?? ""), host: "localhost", port: Number(bound),
+      database: env.POSTGRES_DB || env.POSTGRESQL_DATABASE || user, user, password: env.POSTGRES_PASSWORD || env.POSTGRESQL_PASSWORD || "",
+      inProject: !!dir && (dir === norm(root) || dir.startsWith(norm(root) + "/")),
+    });
+  }
+  return out.sort((a, b) => Number(b.inProject) - Number(a.inProject));
+}

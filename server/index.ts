@@ -13,7 +13,7 @@ import { images } from "./images";
 import { templates } from "./templates";
 import { makeTunnels } from "./tunnel";
 import { saveCredential, sshKey, makeSshKey } from "./git";
-import { dockerApi, makeDockerLogs } from "./docker";
+import { dockerApi, makeDockerLogs, detectPostgres } from "./docker";
 import { pgApi } from "./postgres";
 import { WEB_DIR, DATA_DIR, PACKAGED } from "./paths";
 import { BOILERPLATES, checkTarget, defaultParent, makeBoilerplate } from "./boilerplate";
@@ -213,6 +213,7 @@ const start = (port: number) => Bun.serve<Data>({
       }
       if (p === "/api/templates" && req.method === "GET") return json(await templates.load());
       if (p === "/api/templates" && req.method === "PUT") return json(await templates.save(await req.json()));
+      if (p === "/api/pg/detect") return json(await detectPostgres((() => { try { return projects.get(req.headers.get("x-project") ?? q.get("project")).root; } catch { return anyRoot(); } })()));
       if (p.startsWith("/api/pg/")) return json(await pgApi(p.slice("/api/pg/".length), req.method, await req.json().catch(() => ({}))));
       if (p.startsWith("/api/docker/")) {
         const root = (() => { try { return projects.get(req.headers.get("x-project") ?? q.get("project")).root; } catch { return anyRoot(); } })();

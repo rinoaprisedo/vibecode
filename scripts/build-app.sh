@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-1.0.3}"
+VERSION="${VERSION:-1.0.4}"
 ARCH="$(uname -m)"
 CLAUDE_BIN="node_modules/@anthropic-ai/claude-agent-sdk-darwin-${ARCH/x86_64/x64}/claude"
 W="build/.work/macos"; mkdir -p "$W" build/macos

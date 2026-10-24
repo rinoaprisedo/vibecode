@@ -122,12 +122,15 @@ export const makeGit = (root: string) => {
       const sep = "\x1f";
       const out = await git(["log", `-n${limit}`, `--format=%H${sep}%h${sep}%an${sep}%at${sep}%s${sep}%D`], true).catch(() => "");
       const upstream = await git(["rev-parse", "--abbrev-ref", "@{u}"], true).then((x) => x.trim(), () => "");
-      const local = upstream ? new Set((await git(["rev-list", `${upstream}..HEAD`], true).catch(() => "")).split("\n").filter(Boolean)) : null;
+      // Commits not on the upstream (or, with no upstream yet, not on any remote branch). Counted over the whole history, not just the listed page.
+      const range = upstream ? [`${upstream}..HEAD`] : ["HEAD", "--not", "--remotes"];
+      const all = (await git(["rev-list", ...range], true).catch(() => "")).split("\n").filter(Boolean);
+      const local = new Set(all);
       const commits = out.split("\n").filter(Boolean).map((l) => {
         const [hash, short, author, at, subject, refs] = l.split(sep);
-        return { hash, short, author, at: Number(at) * 1000, subject, refs: refs ? refs.split(", ").filter(Boolean) : [], pushed: local ? !local.has(hash) : false };
+        return { hash, short, author, at: Number(at) * 1000, subject, refs: refs ? refs.split(", ").filter(Boolean) : [], pushed: !local.has(hash) };
       });
-      return { upstream, commits };
+      return { upstream, ahead: all.length, commits };
     },
     // Message body and changed files of one commit.
     async show(hash: string) {
