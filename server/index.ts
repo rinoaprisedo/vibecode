@@ -297,6 +297,7 @@ const start = (port: number) => Bun.serve<Data>({
       else if (m.type === "term-resize") ws.data.term!.resize(m.id, m.cols, m.rows);
       else if (m.type === "term-close") ws.data.term!.close(m.id);
       else if (m.type === "stop") ws.data.agent!.stop(m.chatId);
+      else if (m.type === "set-mode") void ws.data.agent!.setMode(m.chatId, String(m.mode));
     },
   },
 });

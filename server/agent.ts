@@ -59,7 +59,8 @@ async function pickFallback(root: string, tried: Set<string>) {
 // its chatId so the UI can route it even when another session is on screen.
 export function makeAgent(send: Send) {
   const runs = new Map<string, AbortController>();
-  const pending = new Map<string, { chatId: string; resolve: (r: { allow: boolean; answers?: Record<string, string>; message?: string; mode?: string }) => void }>();
+  const queries = new Map<string, { setPermissionMode(mode: any): Promise<void> }>(); // live conversations, so the permission mode can change mid-run
+  const pending = new Map<string, { chatId: string; tool: string; resolve: (r: { allow: boolean; answers?: Record<string, string>; message?: string; mode?: string }) => void }>();
 
   const stop = (chatId: string) => {
     runs.get(chatId)?.abort();
@@ -70,7 +71,25 @@ export function makeAgent(send: Send) {
     }
   };
 
+  // Tools a pending approval may be auto-granted for when the user relaxes the mode while Claude is waiting.
+  const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+  const NEVER_AUTO = new Set(["ExitPlanMode", "AskUserQuestion"]);
+  const setMode = async (chatId: string, mode: string) => {
+    const m = MODES[mode as keyof typeof MODES];
+    if (!m) return;
+    await queries.get(chatId)?.setPermissionMode(m).catch(() => {});
+    // Switching to Auto / Edit automatically also approves what is already waiting and would be allowed by that mode.
+    if (mode !== "auto" && mode !== "edit") return;
+    for (const [id, p] of pending) {
+      if (p.chatId !== chatId || NEVER_AUTO.has(p.tool) || (mode === "edit" && !EDIT_TOOLS.has(p.tool))) continue;
+      p.resolve({ allow: true });
+      pending.delete(id);
+      send({ type: "permission-done", chatId, id });
+    }
+  };
+
   return {
+    setMode,
     answerPermission(id: string, allow: boolean, answers?: Record<string, string>, message?: string, mode?: string) {
       pending.get(id)?.resolve({ allow, answers, message, mode });
       pending.delete(id);
@@ -96,8 +115,11 @@ export function makeAgent(send: Send) {
         let withImages = true;
         for (;;) {
         if (resume) await accounts.ensureSession(account, resume);
-        // With attachments the prompt is one user message made of image blocks followed by the text.
-        let input: Parameters<typeof query>[0]["prompt"] = text;
+        // The prompt goes in as a streaming-input message (a plain string would not allow changing the permission mode mid-run). With
+        // attachments the message is image blocks followed by the text. The input stays open until the result arrives.
+        let release!: () => void;
+        const released = new Promise<void>((r) => (release = r));
+        let content: any = text;
         if (imageIds.length && withImages) {
           const blocks: any[] = [];
           for (const id of imageIds.slice(0, 8)) {
@@ -105,10 +127,12 @@ export function makeAgent(send: Send) {
             blocks.push({ type: "image", source: { type: "base64", media_type: img.mime, data: img.data.toString("base64") } });
           }
           blocks.push({ type: "text", text: text || "(see the attached image)" });
-          input = (async function* () {
-            yield { type: "user" as const, message: { role: "user" as const, content: blocks }, parent_tool_use_id: null };
-          })();
+          content = blocks;
         }
+        const input = (async function* () {
+          yield { type: "user" as const, message: { role: "user" as const, content }, parent_tool_use_id: null };
+          await released;
+        })();
         let progressed = false, switchTo: typeof account | undefined, sessionId = resume;
         const stream = query({
           prompt: input,
@@ -136,17 +160,19 @@ export function makeAgent(send: Send) {
                 if (!isMac) playSound("Exclamation"); else Bun.spawn(["afplay", "/System/Library/Sounds/Ping.aiff"], { stdio: ["ignore", "ignore", "ignore"] });
                 banner("Needs your approval", `${toolName}: ${clip(what, 120)}`, basename(root));
               }
-              const { allow, answers, message, mode } = await new Promise<{ allow: boolean; answers?: Record<string, string>; message?: string; mode?: string }>((resolve) => pending.set(id, { chatId, resolve }));
+              const { allow, answers, message, mode } = await new Promise<{ allow: boolean; answers?: Record<string, string>; message?: string; mode?: string }>((resolve) => pending.set(id, { chatId, tool: toolName, resolve }));
               return allow
                 ? {
                   behavior: "allow", updatedInput: answers ? { ...input, answers } : input,
-                  // Approving a plan can also switch the rest of the session to auto-editing.
-                  ...(toolName === "ExitPlanMode" && mode === "edit" ? { updatedPermissions: [{ type: "setMode" as const, mode: "acceptEdits" as const, destination: "session" as const }] } : {}),
+                  // Approving a plan can also switch the rest of the session to auto-editing (files only) or to Auto mode (safe commands too).
+                  ...(toolName === "ExitPlanMode" && (mode === "edit" || mode === "auto") ? { updatedPermissions: [{ type: "setMode" as const, mode: MODES[mode], destination: "session" as const }] } : {}),
                 }
                 : { behavior: "deny", message: message || "Denied by user" };
             },
           },
         });
+        queries.set(chatId, stream);
+        try {
         for await (const m of stream) {
           if ((m as any).session_id) sessionId = (m as any).session_id;
           if (opts.autoSwitch !== false && !abort.signal.aborted && isLimitHit(m)) {
@@ -162,6 +188,7 @@ export function makeAgent(send: Send) {
           }
           if (m.type === "assistant") { doneTok += (m as any).message?.usage?.output_tokens ?? curTok; curTok = 0; sendTok(true); }
           if (m.type === "assistant" && !m.parent_tool_use_id) { lastUsage = m.message.usage; lastModel = m.message.model; }
+          if (m.type === "result") release();
           if (m.type === "result") void tokens.add(root, (m as any).usage, (m as any).total_cost_usd, (m as any).modelUsage).catch(() => {}); // per-project totals
           if (m.type === "result" && lastUsage) {
             // Context in use = what the last main-loop call read plus what it wrote.
@@ -178,6 +205,7 @@ export function makeAgent(send: Send) {
           }
           out({ type: "sdk", message: m });
         }
+        } finally { release(); queries.delete(chatId); }
         if (!switchTo || abort.signal.aborted) break;
         const from = account;
         account = switchTo; tried.add(account.id);

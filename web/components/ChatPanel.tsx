@@ -137,6 +137,8 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
   const account = accounts.find((a) => a.id === accountId);
 
   const update = (s: Settings) => {
+    // Changing the mode while Claude is working takes effect straight away (and approves what is waiting, if it relaxes the mode).
+    if (s.mode !== settings.mode && cur.busy) conn.current?.send({ type: "set-mode", chatId, mode: s.mode });
     setSettings(s);
     try { localStorage.setItem("vibecode.settings", JSON.stringify(s)); } catch {}
   };
@@ -263,6 +265,7 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
         setUsageKey((k) => k + 1);
         refreshAccounts();
       }
+      else if (m.type === "permission-done") patch(m.chatId, (c) => ({ ...c, items: c.items.map((x) => (x.kind === "permission" && x.id === m.id ? { ...x, answered: true } : x)) }));
       else if (m.type === "tokens") patch(m.chatId, (c) => ({ ...c, tokens: m.out }));
       else if (m.type === "context") patch(m.chatId, (c) => ({ ...c, context: { used: m.used, max: m.max } }));
       else if (m.type === "permission") {
@@ -507,7 +510,7 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
           ))}
         </div>
       )}
-      {plan && <PlanDock key={plan.id} plan={String(plan.input?.plan ?? "")} onApprove={(autoEdit) => { if (autoEdit) update({ ...settings, mode: "edit" }); answer(plan.id, true, undefined, undefined, autoEdit ? "edit" : undefined); }} onRevise={(note) => answer(plan.id, false, undefined, "The user wants the plan revised. Do not implement yet; update the plan and present it again." + (note ? `\nUser notes: ${note}` : ""))} />}
+      {plan && <PlanDock key={plan.id} plan={String(plan.input?.plan ?? "")} onApprove={(next) => { if (next) update({ ...settings, mode: next }); answer(plan.id, true, undefined, undefined, next); }} onRevise={(note) => answer(plan.id, false, undefined, "The user wants the plan revised. Do not implement yet; update the plan and present it again." + (note ? `\nUser notes: ${note}` : ""))} />}
       {ask && <AskDock key={ask.id} input={ask.input} onSubmit={(answers) => answer(ask.id, true, answers)} onCancel={() => answer(ask.id, false)} />}
       <UsageBar refreshKey={usageKey} context={cur.context} account={accountId} />
       <div className={"composer" + (dragging ? " drag" : "")}
@@ -620,15 +623,16 @@ function AskDock({ input, onSubmit, onCancel }: { input: any; onSubmit: (a: Reco
 }
 
 // Plan approval: read the plan, then start work, or keep planning with a note for Claude.
-function PlanDock({ plan, onApprove, onRevise }: { plan: string; onApprove: (autoEdit: boolean) => void; onRevise: (note: string) => void }) {
+function PlanDock({ plan, onApprove, onRevise }: { plan: string; onApprove: (mode?: "auto" | "edit") => void; onRevise: (note: string) => void }) {
   const [note, setNote] = useState("");
   return (
     <div className="ask-dock plan-dock">
       <div className="ask-head"><span className="ask-title">Plan ready. Start working on it?</span></div>
       <div className="plan-body"><Markdown text={plan} /></div>
       <div className="ask-opts">
-        <button className="ask-opt" onClick={() => onApprove(true)}><b>Yes, and auto-edit</b><small>Start working; edit files without asking for the rest of the session</small></button>
-        <button className="ask-opt" onClick={() => onApprove(false)}><b>Yes, ask before each edit</b><small>Start working; keep approving every edit manually</small></button>
+        <button className="ask-opt" onClick={() => onApprove("auto")}><b>Yes, and run in Auto mode</b><small>Start working; approves edits and commands that pass a safety check, and only pauses for anything risky</small></button>
+        <button className="ask-opt" onClick={() => onApprove("edit")}><b>Yes, and auto-edit files</b><small>Start working; files are edited without asking, but shell commands (grep, git, builds…) still ask</small></button>
+        <button className="ask-opt" onClick={() => onApprove()}><b>Yes, ask before each action</b><small>Start working; keep approving every edit and command manually</small></button>
       </div>
       <div className="ask-foot">
         <input placeholder="No, keep planning: tell Claude what to change…" value={note} onChange={(e) => setNote(e.target.value)}
