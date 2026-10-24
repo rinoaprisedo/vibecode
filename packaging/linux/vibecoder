@@ -1,0 +1,16 @@
+#!/bin/sh
+# Launcher: finds the install folder (through symlinks), picks the build for this CPU and starts the server,
+# which opens its own window.
+SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+ROOT="$(dirname "$(dirname "$SELF")")"
+case "$(uname -m)" in
+  x86_64|amd64) A=x64 ;;
+  aarch64|arm64) A=arm64 ;;
+  *) echo "Vibecoder: unsupported CPU $(uname -m) (x86_64 and aarch64 only)" >&2; exit 1 ;;
+esac
+[ -x "$ROOT/$A/server/vibecode-server" ] || { echo "Vibecoder: no $A build in $ROOT" >&2; exit 1; }
+export VIBECODE_WEB="$ROOT/web"
+export VIBECODE_CLAUDE_BIN="$ROOT/$A/claude/claude"
+# Started from the menu there is no folder argument: begin in the home folder.
+[ "$#" -eq 0 ] && cd "$HOME" 2>/dev/null
+exec "$ROOT/$A/server/vibecode-server" "$@"

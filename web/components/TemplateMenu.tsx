@@ -2,20 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { api } from "../lib/api";
 import { Icon } from "./Icon";
-
-// ---- Two-key shortcuts: one modifier + one letter/digit, stored as "Alt+1", "Ctrl+K", "Meta+J" ----
-const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
-// Combos the app or the OS already uses (clipboard, quick open, find, save, window/tab handling, ...).
-const RESERVED = new Set("ACVXZYFGPSWQRTNLHM".split(""));
-const keyOf = (e: KeyboardEvent) => (/^Key([A-Z])$/.exec(e.code)?.[1] ?? /^Digit([0-9])$/.exec(e.code)?.[1] ?? "");
-const comboOf = (e: KeyboardEvent): string => {
-  if (e.shiftKey) return "";
-  const k = keyOf(e); if (!k) return "";
-  const mods = [e.ctrlKey && "Ctrl", e.altKey && "Alt", e.metaKey && "Meta"].filter(Boolean) as string[];
-  return mods.length === 1 ? `${mods[0]}+${k}` : "";
-};
-const reservedCombo = (c: string) => { const [m, k] = c.split("+"); return (m === "Ctrl" || m === "Meta") && RESERVED.has(k); };
-const pretty = (c: string) => { const [m, k] = c.split("+"); return isMac ? ({ Ctrl: "⌃", Alt: "⌥", Meta: "⌘" } as Record<string, string>)[m] + k : `${m}+${k}`; };
+import { comboOf, pretty, reservedCombo, getShortcuts, SHORTCUT_LABELS, type AppShortcuts } from "../lib/shortcuts";
 
 type Template = { id: string; title: string; text: string; shortcut?: string };
 type Data = { prompts: Template[]; terminals: Template[] };
@@ -90,6 +77,9 @@ export function TemplateMenu({ onSend, onToChat, onRun }: {
     const c = comboOf(e.nativeEvent);
     if (!c) { if (!["Control", "Alt", "Meta", "Shift"].includes(e.key)) setError("Use one modifier plus one letter or digit, e.g. " + pretty("Alt+1")); return; }
     if (reservedCombo(c)) { setError(`${pretty(c)} is already used by the app or the system. Try ${pretty("Alt+" + c.split("+")[1])}.`); return; }
+    const app = getShortcuts();
+    const appClash = (Object.keys(app) as (keyof AppShortcuts)[]).find((k) => app[k] === c);
+    if (appClash) { setError(`${pretty(c)} is already used for “${SHORTCUT_LABELS[appClash]}” (see Settings).`); return; }
     const clash = data?.prompts.find((p) => p.shortcut === c && p.id !== draft.id);
     if (clash) { setError(`${pretty(c)} is already set on “${clash.title}”.`); return; }
     setError(""); setDraft({ ...draft, shortcut: c }); (e.target as HTMLElement).blur();

@@ -1,4 +1,4 @@
-import { isWin, winBeep, winNotify } from "./platform";
+import { isMac, playSound, notify } from "./platform";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { basename } from "node:path";
 import { accounts } from "./accounts";
@@ -23,7 +23,7 @@ const clip = (t: string, n: number) => {
 // macOS notification banner. Text goes in as argv so it can't be interpreted as AppleScript.
 // Inside the Mac app the UI posts the banner itself (so clicking it can open the chat); this is the browser fallback.
 function banner(title: string, body: string, subtitle: string) {
-  if (isWin) return winNotify(title, `${subtitle}: ${body}`);
+  if (!isMac) return notify(title, `${subtitle}: ${body}`);
   if (process.env.VIBECODE_APP) return;
   Bun.spawn(
     ["osascript",
@@ -127,7 +127,7 @@ export function makeAgent(send: Send) {
                 const what = toolName === "ExitPlanMode" ? "Plan ready for review"
                   : toolName === "AskUserQuestion" ? String((i.questions as any)?.[0]?.question ?? "Claude has a question")
                   : String(i.command ?? i.file_path ?? i.url ?? i.pattern ?? toolName);
-                if (isWin) winBeep("Exclamation"); else Bun.spawn(["afplay", "/System/Library/Sounds/Ping.aiff"], { stdio: ["ignore", "ignore", "ignore"] });
+                if (!isMac) playSound("Exclamation"); else Bun.spawn(["afplay", "/System/Library/Sounds/Ping.aiff"], { stdio: ["ignore", "ignore", "ignore"] });
                 banner("Needs your approval", `${toolName}: ${clip(what, 120)}`, basename(root));
               }
               const { allow, answers, message, mode } = await new Promise<{ allow: boolean; answers?: Record<string, string>; message?: string; mode?: string }>((resolve) => pending.set(id, { chatId, resolve }));
@@ -184,7 +184,7 @@ export function makeAgent(send: Send) {
         // Chime + notification when a reply finishes (not when the user pressed Stop).
         const notify = !abort.signal.aborted && opts.sound !== false;
         if (notify) {
-          if (isWin) winBeep(); else Bun.spawn(["afplay", "/System/Library/Sounds/Glass.aiff"], { stdio: ["ignore", "ignore", "ignore"] });
+          if (!isMac) playSound(); else Bun.spawn(["afplay", "/System/Library/Sounds/Glass.aiff"], { stdio: ["ignore", "ignore", "ignore"] });
           banner(clip(prompt, 60), clip(lastText, 140) || "Done", basename(root));
         }
         out({ type: "done", notify: notify ? { title: clip(prompt, 60), body: clip(lastText, 140) || "Done" } : undefined });

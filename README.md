@@ -97,11 +97,26 @@ Bisa dibuat dari Mac (cross-compile), butuh Bun, npm, dan python3:
 
 Hasilnya folder `Vibecoder/` berisi `Vibecoder.cmd` (klik dua kali), `server/vibecode-server.exe`, `web/`, dan `claude/claude.exe`. UI dibuka di jendela app Microsoft Edge (atau Chrome/Brave); menutup jendela menghentikan server. Data tersimpan di `%APPDATA%\Vibecode`. Terminal di Windows berbasis baris (PowerShell lewat pipe). Belum ditandatangani, jadi SmartScreen akan memberi peringatan.
 
+## Linux (Arch dan lainnya)
+
+Satu tarball untuk x86_64 dan aarch64. Build dari Mac atau Linux (cross-compile), butuh Bun, npm, dan python3:
+
+```bash
+./scripts/build-linux.sh           # -> build/Vibecoder-<versi>-linux.tar.gz
+```
+
+Pengguna: ekstrak, lalu `./install.sh` (tanpa root; ke `~/.local/share/vibecoder`, perintah `vibecoder`, dan menu aplikasi, hanya build untuk CPU-nya yang disalin). `./bin/vibecoder` menjalankan tanpa memasang, `./uninstall.sh` menghapus.
+
+**Arch:** di folder hasil ekstrak sudah ada `PKGBUILD`, jalankan `makepkg -si`. Dicoba di Arch asli (x86_64): paket terbentuk, terpasang, dan app berjalan; arm64 dicoba di Debian. Paket opsional: `zenity` (dialog folder), `libnotify` (notifikasi), `xdg-utils` (buka tautan), `chromium` atau browser Chromium lain (jendela app), `git`, `docker`.
+
+UI dibuka di jendela app browser Chromium (`--app`); tanpa itu dibuka di browser bawaan dan server berhenti beberapa detik setelah tab terakhir ditutup. Data ada di `~/.config/Vibecoder`. Terminalnya penuh (PTY), seperti di Mac.
+
 ## Struktur
 
 ```
 server/   server Bun: file, git, chat (Claude Agent SDK), terminal, akun, remote
 web/      UI React + CodeMirror 6 + xterm.js
 app/      pembungkus macOS (Swift + WebKit) yang menjalankan server
-scripts/  skrip build .app / .dmg / Windows .zip
+scripts/  skrip build .app / .dmg, installer Windows, tarball Linux
+packaging/ file bantu Linux (launcher, install.sh) dan PKGBUILD untuk Arch
 ```

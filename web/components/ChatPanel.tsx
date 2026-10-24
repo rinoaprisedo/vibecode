@@ -10,6 +10,7 @@ import { RemotePanel, type RemoteState } from "./RemotePanel";
 import { ContextMenu, tabMenu } from "./ContextMenu";
 import { ModelMenu } from "./ModelMenu";
 import { TemplateMenu } from "./TemplateMenu";
+import { comboOf, pretty, useShortcuts } from "../lib/shortcuts";
 import { Icon, type IconName } from "./Icon";
 import { Markdown } from "./Markdown";
 import { projectTint } from "../lib/projectColor";
@@ -158,6 +159,21 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
   };
   const newTab = (project = projectRef.current) =>
     addTab(crypto.randomUUID(), project, { items: [], busy: false, project, account: defaultAccount });
+  // App shortcuts (changeable in Settings): focus the message box, open a new chat tab.
+  const shortcuts = useShortcuts();
+  const focusInput = () => requestAnimationFrame(() => { const el = taRef.current; if (!el) return; el.focus(); el.setSelectionRange(el.value.length, el.value.length); });
+  const scRef = useRef({ shortcuts, focusInput, newTab }); scRef.current = { shortcuts, focusInput, newTab };
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.repeat || (e.target as HTMLElement | null)?.closest?.("[data-shortcut-rec]")) return;
+      const c = comboOf(e); if (!c) return;
+      const { shortcuts: s, focusInput: focus, newTab: nt } = scRef.current;
+      if (c === s.focusChat) { e.preventDefault(); e.stopPropagation(); focus(); }
+      else if (c === s.newChat) { e.preventDefault(); e.stopPropagation(); if (projectRef.current) { nt(); focus(); } }
+    };
+    window.addEventListener("keydown", h, true);
+    return () => window.removeEventListener("keydown", h, true);
+  }, []);
   const loadChat = async (id: string, project: string): Promise<ChatState> => {
     const c = await api<{ claudeSession?: string; items: Item[]; context?: Context; account?: string }>(`/api/chats/${id}`, { project });
     // Permission prompts from a past run can't be answered anymore.
@@ -439,7 +455,7 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
             );
           })}
         </div>
-        <button className="g-icon tbtn" style={{ visibility: "visible" }} title="New chat tab" onClick={() => newTab()}><Icon name="plus" size={16} /></button>
+        <button className="g-icon tbtn" style={{ visibility: "visible" }} title={"New chat tab" + (shortcuts.newChat ? ` (${pretty(shortcuts.newChat)})` : "")} onClick={() => newTab()}><Icon name="plus" size={16} /></button>
         <ChatHistory project={projectId} projectName={nameOf(projectId)} currentId={chatId} refreshKey={listKey} status={status}
           onOpen={(id) => openChat(id).catch(() => {})}
           onDeleted={(id) => { if (tabsRef.current.some((t) => t.id === id)) closeTab(id); }} />
@@ -520,7 +536,7 @@ export function ChatPanel({ projects, projectId, onFocusProject, onStatus, accou
         )}
         <textarea
           ref={taRef} rows={1} spellCheck={false} autoCorrect="off" autoCapitalize="off" autoComplete="off"
-          value={input} placeholder="Ask Claude…  (Enter to send, paste images)"
+          value={input} placeholder={"Ask Claude…  (Enter to send, paste images" + (shortcuts.focusChat ? `, ${pretty(shortcuts.focusChat)} to focus` : "") + ")"}
           onChange={(e) => setInput(e.target.value)}
           onPaste={(e) => {
             const files = [...e.clipboardData.files].filter(isImage);

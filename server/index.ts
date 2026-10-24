@@ -1,4 +1,4 @@
-import { isWin, winPickFolder, findAppBrowser, openUrl } from "./platform";
+import { isWin, isMac, pickFolderNative, findAppBrowser, openUrl } from "./platform";
 import { resolve, join } from "node:path";
 import { homedir } from "node:os";
 import { makeAgent } from "./agent";
@@ -14,7 +14,7 @@ import { templates } from "./templates";
 import { makeTunnels } from "./tunnel";
 import { saveCredential, sshKey, makeSshKey } from "./git";
 import { dockerApi, makeDockerLogs } from "./docker";
-import { WEB_DIR, DATA_DIR } from "./paths";
+import { WEB_DIR, DATA_DIR, PACKAGED } from "./paths";
 import { BOILERPLATES, checkTarget, defaultParent, makeBoilerplate } from "./boilerplate";
 import { pasteInto } from "./fs";
 import { relative } from "node:path";
@@ -57,7 +57,7 @@ process.on("SIGTERM", shutdown);
 
 // Native macOS folder picker (the server runs on the user's Mac).
 async function pickFolder(prompt = "Open Folder"): Promise<string | null> {
-  if (isWin) return winPickFolder(prompt);
+  if (!isMac) return pickFolderNative(prompt);
   const p = Bun.spawn(
     ["osascript", "-e", "on run argv", "-e", "POSIX path of (choose folder with prompt (item 1 of argv))", "-e", "end run", prompt],
     { stdout: "pipe", stderr: "ignore" },
@@ -66,6 +66,7 @@ async function pickFolder(prompt = "Open Folder"): Promise<string | null> {
   return (await p.exited) === 0 && out ? out : null; // non-zero = user cancelled
 }
 
+let idleExit = false, idleTimer: ReturnType<typeof setTimeout> | undefined;
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 
 const start = (port: number) => Bun.serve<Data>({
@@ -242,6 +243,7 @@ const start = (port: number) => Bun.serve<Data>({
   websocket: {
     open(ws) {
       sockets.add(ws);
+      clearTimeout(idleTimer);
       const out = (m: unknown) => ws.send(JSON.stringify(m));
       ws.data.agent = makeAgent(out);
       // A finished sign-in is checked first: signing the same Anthropic account in twice is refused.
@@ -259,6 +261,7 @@ const start = (port: number) => Bun.serve<Data>({
       ws.data.dockerLogs = makeDockerLogs(out);
     },
     close(ws) {
+      if (idleExit && sockets.size <= 1) idleTimer = setTimeout(() => { if (sockets.size === 0) shutdown(); }, 20_000);
       ws.data.agent?.stopAll();
       ws.data.login?.stop();
       ws.data.term?.closeAll();
@@ -285,15 +288,21 @@ const start = (port: number) => Bun.serve<Data>({
 
 // A preferred port keeps the web view's origin stable; if it is taken, let the OS pick one.
 let server: ReturnType<typeof start>;
-try { server = start(Number(process.env.PORT ?? (isWin ? 47474 : 4747))); } catch { server = start(0); }
+try { server = start(Number(process.env.PORT ?? (isWin || PACKAGED ? 47474 : 4747))); } catch { server = start(0); }
 
 const url = `http://127.0.0.1:${server.port}/?token=${token}`;
 console.log(`vibecode: ${projects.list().map((p) => p.root).join(", ")}\n${url}`);
-if (isWin && !process.env.VIBECODE_NO_WINDOW && process.env.NO_OPEN !== "1" && findAppBrowser()) {
-  // Windows: show the UI in its own chrome-less app window (Edge ships with Windows) with a private profile so the
-  // window, its saved settings and its lifetime belong to Vibecoder. Closing the window stops the server.
+// Windows (always) and the packaged Linux build: show the UI in its own chrome-less app window (Edge ships with Windows; on
+// Linux any Chromium-based browser) with a private profile, so the window and its saved settings belong to Vibecoder.
+// Closing the window stops the server. Without such a browser the UI opens in the default one and the server exits a
+// little after the last tab is closed (packaged builds only), so it never lingers in the background.
+const appBrowser = !isMac && (isWin || PACKAGED) && !process.env.VIBECODE_NO_WINDOW ? findAppBrowser() : null;
+if (appBrowser && process.env.NO_OPEN !== "1") {
   const profile = join(DATA_DIR, "window");
   const started = Date.now();
-  const win = Bun.spawn([findAppBrowser()!, `--app=${url}`, `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--window-size=1440,900"], { stdio: ["ignore", "ignore", "ignore"] });
+  const win = Bun.spawn([appBrowser, `--app=${url}`, `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--window-size=1440,900", "--ozone-platform-hint=auto"], { stdio: ["ignore", "ignore", "ignore"] });
   void win.exited.then(() => { if (Date.now() - started > 3000) shutdown(); });
-} else if (process.env.NO_OPEN !== "1") openUrl(url);
+} else {
+  if (process.env.NO_OPEN !== "1") openUrl(url);
+  if (!isMac && PACKAGED) idleExit = true;
+}

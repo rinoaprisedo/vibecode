@@ -1243,3 +1243,4 @@ kbd { font: 10.5px var(--mono); padding: 1px 6px; border-radius: 5px; border: 1p
 .tpl-sc-in { min-width: 92px; justify-content: center; font: 600 12px var(--mono); padding: 4px 10px; color: var(--faint); }
 .tpl-sc-in.set { color: var(--text); }
 .tpl-sc-in.rec { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); color: var(--accent-hi); }
+.sc-row { display: flex; align-items: center; gap: 10px; font-size: 13px; } .sc-row > span { flex: 1; }

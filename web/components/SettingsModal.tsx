@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type React from "react";
 import { api } from "../lib/api";
 import { Icon } from "./Icon";
 import { LoginFlow } from "./LoginFlow";
 import { ACCOUNT_COLORS, accountColor, type Account } from "./AccountMenu";
 import { applyTheme, useTheme } from "../lib/theme";
+import { comboOf, pretty, reservedCombo, setShortcuts, useShortcuts, DEFAULT_SHORTCUTS, SHORTCUT_LABELS, type AppShortcuts } from "../lib/shortcuts";
 
 // Settings → Accounts: add several Claude subscriptions and sign each in or out.
 export function SettingsModal({ accounts, refresh, onClose }: { accounts: Account[]; refresh: () => void; onClose: () => void }) {
@@ -13,6 +15,26 @@ export function SettingsModal({ accounts, refresh, onClose }: { accounts: Accoun
   const theme = useTheme();
   const [autoSwitch, setAutoSwitch] = useState(() => { try { return localStorage.getItem("vibecode.autoSwitch") !== "off"; } catch { return true; } });
   const toggleAutoSwitch = () => setAutoSwitch((v) => { try { localStorage.setItem("vibecode.autoSwitch", v ? "off" : "on"); } catch {} return !v; });
+
+  // Keyboard shortcuts: click a field and press modifier + key. Template shortcuts are read so the two never clash.
+  const sc = useShortcuts();
+  const [rec, setRec] = useState<keyof AppShortcuts | null>(null);
+  const [scErr, setScErr] = useState("");
+  const [tplKeys, setTplKeys] = useState<Record<string, string>>({});
+  useEffect(() => { api<{ prompts: { title: string; shortcut?: string }[] }>("/api/templates").then((d) => setTplKeys(Object.fromEntries(d.prompts.filter((p) => p.shortcut).map((p) => [p.shortcut!, p.title])))).catch(() => {}); }, []);
+  const recordKey = (name: keyof AppShortcuts) => (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === "Tab") return;
+    e.preventDefault(); e.stopPropagation();
+    if (e.key === "Escape") { (e.target as HTMLElement).blur(); return; }
+    if (e.key === "Backspace" || e.key === "Delete") { setShortcuts({ ...sc, [name]: "" }); setScErr(""); return; }
+    const c = comboOf(e.nativeEvent);
+    if (!c) { if (!["Control", "Alt", "Meta", "Shift"].includes(e.key)) setScErr("Use one modifier plus one letter or digit, e.g. " + pretty("Alt+1")); return; }
+    if (reservedCombo(c)) { setScErr(`${pretty(c)} is already used by the app or the system. Try ${pretty("Alt+" + c.split("+")[1])}.`); return; }
+    const other = (Object.keys(sc) as (keyof AppShortcuts)[]).find((k) => k !== name && sc[k] === c);
+    if (other) { setScErr(`${pretty(c)} is already set for “${SHORTCUT_LABELS[other]}”.`); return; }
+    if (tplKeys[c]) { setScErr(`${pretty(c)} is already set on the template “${tplKeys[c]}”.`); return; }
+    setScErr(""); setShortcuts({ ...sc, [name]: c }); (e.target as HTMLElement).blur();
+  };
 
   const run = (fn: () => Promise<unknown>) => fn().then(refresh).catch((e) => setError(e.message));
   const add = () => run(async () => { const a = await api<Account>("/api/accounts", { body: {} }); setSigningIn(a.id); });
@@ -35,6 +57,21 @@ export function SettingsModal({ accounts, refresh, onClose }: { accounts: Accoun
               <button className={theme === "dark" ? "on" : ""} onClick={() => applyTheme("dark")}><Icon name="moon" size={14} /> Dark</button>
               <button className={theme === "light" ? "on" : ""} onClick={() => applyTheme("light")}><Icon name="sun" size={14} /> Light</button>
             </div>
+          </section>
+
+          <section className="set-sec">
+            <div className="set-sec-head"><h4>Keyboard shortcuts</h4><p className="muted">Click a field, then press a modifier plus one key. Backspace turns a shortcut off. Prompt templates have their own shortcut in the template editor.</p></div>
+            {scErr && <div className="err">{scErr}</div>}
+            {(Object.keys(SHORTCUT_LABELS) as (keyof AppShortcuts)[]).map((k) => (
+              <div key={k} className="sc-row">
+                <span>{SHORTCUT_LABELS[k]}</span>
+                <button type="button" data-shortcut-rec className={"tpl-sc-in" + (rec === k ? " rec" : "") + (sc[k] ? " set" : "")}
+                  onFocus={() => setRec(k)} onBlur={() => setRec(null)} onKeyDown={recordKey(k)} title="Click, then press a modifier + key">
+                  {rec === k ? "Press keys…" : sc[k] ? pretty(sc[k]) : "Off"}
+                </button>
+                <button type="button" className="g-icon" style={{ visibility: sc[k] === DEFAULT_SHORTCUTS[k] ? "hidden" : "visible" }} title="Reset to default" onClick={() => { setShortcuts({ ...sc, [k]: DEFAULT_SHORTCUTS[k] }); setScErr(""); }}><Icon name="rotate" size={13} /></button>
+              </div>
+            ))}
           </section>
 
           <section className="set-sec">

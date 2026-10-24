@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Cross-builds the Windows (x64) app from a Mac/Linux box: build/windows/Vibecoder/ and build/Vibecoder-<version>-win-x64.zip.
-# Needs bun, npm, python3 and (for the icon) sips on macOS or a ready build/Vibecoder.ico.
+# Cross-builds the Windows (x64) installer from a Mac/Linux box: build/Vibecoder-Setup-<version>-x64.exe
+# (PORTABLE=1 also writes build/Vibecoder-<version>-win-x64.zip). Needs bun, npm, python3, makensis (brew install makensis)
+# and (for the icon) sips on macOS or a ready build/Vibecoder.ico.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -43,6 +44,7 @@ cp build/vibecode-server.exe       "$OUT/server/vibecode-server.exe"
 cp "$CLAUDE_EXE"                   "$OUT/claude/claude.exe"
 cp web/index.html web/loading.gif  "$OUT/web/"
 cp web/dist/main.js web/dist/main.css "$OUT/web/dist/"
+cp build/Vibecoder.ico "$OUT/Vibecoder.ico"
 # Double-click entry point at the top of the folder (the server exe opens its own window and has no console).
 cat > "$OUT/Vibecoder.cmd" <<'CMD'
 @echo off
@@ -63,6 +65,16 @@ Logs: %APPDATA%\Vibecode\server.log (if present).
 The built-in terminal on Windows is line-based (PowerShell over pipes): commands and their output work, full-screen programs do not.
 TXT
 
-echo "==> Zip"
-rm -f "$ZIP"; (cd build/windows && zip -qr "../../$ZIP" Vibecoder)
-echo "Done: $ZIP ($(du -h "$ZIP" | cut -f1))"
+echo "==> Installer (NSIS)"
+command -v makensis >/dev/null || { echo "makensis not found (brew install makensis)"; exit 1; }
+SETUP="build/Vibecoder-Setup-${VERSION}-x64.exe"
+rm -f "$SETUP"
+# makensis aborts (bad_alloc) when no UTF-8 locale is set
+LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 makensis -V2 -DVERSION="$VERSION" -DSRC="$PWD/$OUT" -DOUT="$PWD/$SETUP" scripts/installer.nsi
+echo "Done: $SETUP ($(du -h "$SETUP" | cut -f1))"
+
+# Optional portable zip (no installer): PORTABLE=1 ./scripts/build-windows.sh
+if [ "${PORTABLE:-0}" = "1" ]; then
+  rm -f "$ZIP"; (cd build/windows && zip -qr "../../$ZIP" Vibecoder)
+  echo "Done: $ZIP ($(du -h "$ZIP" | cut -f1))"
+fi

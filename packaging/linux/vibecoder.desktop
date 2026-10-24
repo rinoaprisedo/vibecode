@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Vibecoder
+GenericName=AI coding IDE
+Comment=Editor, git, terminal and Claude chat in one window
+Exec=@EXEC@
+Icon=@ICON@
+Terminal=false
+Categories=Development;IDE;
+Keywords=claude;ai;code;editor;git;
+StartupNotify=true

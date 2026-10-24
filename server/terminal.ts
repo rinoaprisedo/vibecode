@@ -1,4 +1,4 @@
-import { isWin, winShell } from "./platform";
+import { isWin, isLinux, winShell } from "./platform";
 import { dockerBin, dockerEnv, isContainerRef } from "./docker";
 
 type Send = (msg: unknown) => void;
@@ -49,7 +49,7 @@ export function makeTerminals(send: Send) {
       if (docker !== undefined && !bin) return send({ type: "term-exit", id, code: 1 });
       const argv = bin
         ? [bin, "exec", "-it", docker!, "sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash || exec sh"]
-        : isWin ? winShell() : [process.env.SHELL ?? "/bin/zsh", "-l"];
+        : isWin ? winShell() : [process.env.SHELL ?? (isLinux ? "/bin/bash" : "/bin/zsh"), "-l"];
       if (isWin && !bin) return openPiped(id, argv, root, dec);
       const proc = Bun.spawn(argv, {
         cwd: root,

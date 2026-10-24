@@ -1,0 +1,33 @@
+# Maintainer: rinoaprisedo.com
+# Build from the extracted release folder:  cd vibecoder-@VERSION@-linux && makepkg -si
+# The Bun server is a single-file executable, so nothing is compiled; this only repackages the files next to it.
+pkgname=vibecoder-bin
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc='IDE with git, terminal and an agentic Claude chat in one window'
+arch=('x86_64' 'aarch64')
+url='https://github.com/rinoaprisedo/vibecode'
+license=('custom')
+depends=('glibc')
+optdepends=('zenity: folder picker dialog'
+            'libnotify: desktop notifications'
+            'xdg-utils: open links in your browser'
+            'chromium: app window (any Chromium-based browser works: chrome, brave, edge, vivaldi)'
+            'git: git panel'
+            'docker: Docker panel')
+provides=('vibecoder')
+conflicts=('vibecoder')
+# The server is a Bun single-file executable with an appended payload: stripping it would corrupt it.
+options=('!strip' '!debug' '!lto')
+source=()
+
+package() {
+  case "$CARCH" in x86_64) a=x64 ;; aarch64) a=arm64 ;; esac
+  install -d "$pkgdir/opt/vibecoder"
+  cp -a "$startdir/bin" "$startdir/web" "$startdir/$a" "$pkgdir/opt/vibecoder/"
+  install -d "$pkgdir/usr/bin"
+  ln -s /opt/vibecoder/bin/vibecoder "$pkgdir/usr/bin/vibecoder"
+  install -Dm644 "$startdir/share/vibecoder.png" "$pkgdir/usr/share/icons/hicolor/512x512/apps/vibecoder.png"
+  sed -e 's|@EXEC@|vibecoder|' -e 's|@ICON@|vibecoder|' "$startdir/share/vibecoder.desktop" > "$srcdir/vibecoder.desktop"
+  install -Dm644 "$srcdir/vibecoder.desktop" "$pkgdir/usr/share/applications/vibecoder.desktop"
+}
